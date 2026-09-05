@@ -1,0 +1,80 @@
+<launch>
+  <!-- 场地/地图参数(按你们实际场地改) -->
+  <arg name="map_size_x" value="50.0"/>
+  <arg name="map_size_y" value="50.0"/>
+  <arg name="map_size_z" value="10.0"/>
+  <arg name="init_x" value="0"/>
+  <arg name="init_y" value="0"/>
+  <arg name="init_z" value="1.0"/>
+
+  <!-- 真机定位话题:FAST-LIO 高频里程计 -->
+  <arg name="odom_topic" value="/Odom_high_freq"/>
+
+  <!-- ===== 算法主体(参数都在 algorithm.xml 内) ===== -->
+  <include file="$(find exploration_manager)/launch/algorithm.xml">
+    <arg name="map_size_x_" value="$(arg map_size_x)"/>
+    <arg name="map_size_y_" value="$(arg map_size_y)"/>
+    <arg name="map_size_z_" value="$(arg map_size_z)"/>
+
+    <!-- 探索范围硬边界:必须在场地内留安全边距 -->
+    <arg name="box_min_x" value="-2.5"/>
+    <arg name="box_min_y" value="-2.0"/>
+    <arg name="box_min_z" value="-0.5"/>
+    <arg name="box_max_x" value="2.5"/>
+    <arg name="box_max_y" value="2.0"/>
+    <arg name="box_max_z" value="3.0"/>
+
+    <!-- 真机话题:全部指向 FAST-LIO / fuel_bridge -->
+    <arg name="odometry_topic" value="$(arg odom_topic)"/>
+    <arg name="sensor_pose_topic" value="/map_ros/pose"/>
+    <arg name="depth_topic" value="/no_depth"/>       <!-- 假话题:保证没人往这发图 -->
+    <arg name="cloud_topic" value="/cloud_registered"/>
+
+    <!-- 深度相机内参:保留默认即可,无深度数据时不会被用到 -->
+    <arg name="cx" value="321.04638671875"/>
+    <arg name="cy" value="243.44969177246094"/>
+    <arg name="fx" value="387.229248046875"/>
+    <arg name="fy" value="387.229248046875"/>
+
+    <!-- 首飞速度 -->
+    <arg name="max_vel" value="0.9"/>
+    <arg name="max_acc" value="2.0"/>
+  </include>
+
+  <!-- ===== odom → PoseStamped 适配(fuel_bridge 包) ===== -->
+  <node pkg="fuel_bridge" type="odom_to_pose" name="odom_to_pose" output="screen">
+    <remap from="~odom" to="/Odom_high_freq"/>
+    <remap from="~pose" to="/map_ros/pose"/>
+  </node>
+
+  <!-- ===== 轨迹服务器:输出 /position_cmd 直接喂 px4ctrl ===== -->
+  <node pkg="plan_manage" name="traj_server" type="traj_server" output="screen">
+    <remap from="/odom_world" to="$(arg odom_topic)"/>
+    <!-- 已删除:<remap from="/position_cmd" to="planning/pos_cmd"/> -->
+
+    <param name="traj_server/time_forward" value="1.5" type="double"/>
+    <param name="traj_server/pub_traj_id" value="4" type="int"/>
+    <param name="traj_server/init_x" value="$(arg init_x)" type="double"/>
+    <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
+    <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
+
+    <!-- 与 algorithm.xml 里的四行保持一致(§4.2) -->
+    <param name="perception_utils/top_angle" value="1.0" type="double"/>
+    <param name="perception_utils/left_angle" value="1.55" type="double"/>
+    <param name="perception_utils/right_angle" value="1.55" type="double"/>
+    <param name="perception_utils/max_dist" value="10.0" type="double"/>
+    <param name="perception_utils/vis_dist" value="1.0" type="double"/>
+  </node>
+
+  <!-- ===== Rviz 2D Nav Goal 触发探索(原样保留) ===== -->
+  <node pkg="waypoint_generator" name="waypoint_generator" type="waypoint_generator" output="screen">
+    <remap from="~odom" to="$(arg odom_topic)"/>
+    <remap from="~goal" to="/move_base_simple/goal"/>
+    <remap from="~traj_start_trigger" to="/traj_start_trigger"/>
+    <param name="waypoint_type" value="point"/>
+  </node>
+
+  <!-- 世界系对齐:FAST-LIO 用 camera_init,FUEL 可视化用 world,桥一层静态 tf -->
+  <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_camera_init"
+        args="0 0 0 0 0 0 world camera_init"/>
+</launch>
