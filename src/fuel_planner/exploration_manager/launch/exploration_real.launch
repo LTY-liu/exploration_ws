@@ -40,6 +40,13 @@
     <!-- 首飞速度 -->
     <arg name="max_vel" value="0.9"/>
     <arg name="max_acc" value="2.0"/>
+
+    <!-- MID360 native FOV. Rotation is lidar -> IMU/body and matches FAST-LIO mid360.yaml. -->
+    <arg name="perception_fov_type" value="omni_lidar"/>
+    <arg name="perception_vertical_min" value="-0.1221730476"/>  <!-- -7 deg -->
+    <arg name="perception_vertical_max" value="0.9075712110"/>   <!-- 52 deg -->
+    <arg name="perception_sensor_to_body_R"
+         value="0.9659, 0, 0.2588, 0, 1, 0, -0.2588, 0, 0.9659"/>
   </include>
 
   <!-- ===== odom → PoseStamped 适配(fuel_bridge 包) ===== -->
@@ -59,12 +66,16 @@
     <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
     <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
 
-    <!-- 与 algorithm.xml 里的四行保持一致(§4.2) -->
+    <!-- 与 exploration_node 使用同一 MID360 可见性模型 -->
+    <param name="perception_utils/fov_type" value="omni_lidar" type="string"/>
     <param name="perception_utils/top_angle" value="1.0" type="double"/>
     <param name="perception_utils/left_angle" value="1.55" type="double"/>
     <param name="perception_utils/right_angle" value="1.55" type="double"/>
     <param name="perception_utils/max_dist" value="10.0" type="double"/>
     <param name="perception_utils/vis_dist" value="1.0" type="double"/>
+    <param name="perception_utils/vertical_min" value="-0.1221730476" type="double"/>
+    <param name="perception_utils/vertical_max" value="0.9075712110" type="double"/>
+    <rosparam param="perception_utils/sensor_to_body_R">[0.9659, 0, 0.2588, 0, 1, 0, -0.2588, 0, 0.9659]</rosparam>
   </node>
 
   <!-- ===== Rviz 2D Nav Goal 触发探索(原样保留) ===== -->
