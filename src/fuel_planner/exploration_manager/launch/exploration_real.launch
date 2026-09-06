@@ -18,10 +18,10 @@
 
     <!-- 探索范围硬边界:必须盖住整个场地(5×6m+四周网),并在网外留余量
          网才在 box 内才会被当成前沿去飞近建图;否则会提前 finish exploration -->
-    <arg name="box_min_x" value="-3.0"/>
+    <arg name="box_min_x" value="-4.5"/>
     <arg name="box_min_y" value="-3.5"/>
-    <arg name="box_min_z" value="0.0"/>
-    <arg name="box_max_x" value="3.0"/>
+    <arg name="box_min_z" value="-0.5"/>
+    <arg name="box_max_x" value="4.5"/>
     <arg name="box_max_y" value="3.5"/>
     <arg name="box_max_z" value="2.5"/>
 
