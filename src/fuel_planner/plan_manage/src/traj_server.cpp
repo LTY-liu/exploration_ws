@@ -161,7 +161,7 @@ void drawCmd(const Eigen::Vector3d& pos, const Eigen::Vector3d& vec, const int& 
   mk_state.color.a = color(3);
 
   cmd_vis_pub.publish(mk_state);
-}
+}.cache
 
 void replanCallback(std_msgs::Empty msg) {
   // Informed of new replan, end the current traj after some time

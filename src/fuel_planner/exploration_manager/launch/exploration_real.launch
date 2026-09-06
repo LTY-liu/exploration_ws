@@ -1,8 +1,8 @@
 <launch>
   <!-- 场地/地图参数(按你们实际场地改) -->
-  <arg name="map_size_x" value="50.0"/>
-  <arg name="map_size_y" value="50.0"/>
-  <arg name="map_size_z" value="10.0"/>
+  <arg name="map_size_x" value="20.0"/>
+  <arg name="map_size_y" value="40.0"/>
+  <arg name="map_size_z" value="4.0"/>
   <arg name="init_x" value="0"/>
   <arg name="init_y" value="0"/>
   <arg name="init_z" value="1.0"/>
@@ -16,13 +16,14 @@
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
 
-    <!-- 探索范围硬边界:必须在场地内留安全边距 -->
-    <arg name="box_min_x" value="-2.5"/>
-    <arg name="box_min_y" value="-2.0"/>
-    <arg name="box_min_z" value="-0.5"/>
-    <arg name="box_max_x" value="2.5"/>
-    <arg name="box_max_y" value="2.0"/>
-    <arg name="box_max_z" value="3.0"/>
+    <!-- 探索范围硬边界:必须盖住整个场地(5×6m+四周网),并在网外留余量
+         网才在 box 内才会被当成前沿去飞近建图;否则会提前 finish exploration -->
+    <arg name="box_min_x" value="-3.0"/>
+    <arg name="box_min_y" value="-3.5"/>
+    <arg name="box_min_z" value="0.0"/>
+    <arg name="box_max_x" value="3.0"/>
+    <arg name="box_max_y" value="3.5"/>
+    <arg name="box_max_z" value="2.5"/>
 
     <!-- 真机话题:全部指向 FAST-LIO / fuel_bridge -->
     <arg name="odometry_topic" value="$(arg odom_topic)"/>
