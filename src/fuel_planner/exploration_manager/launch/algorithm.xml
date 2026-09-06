@@ -23,6 +23,12 @@
   <arg name="max_vel"/>
   <arg name="max_acc"/>
 
+  <!-- Sensor model used only for frontier visibility, never to transform map point clouds. -->
+  <arg name="perception_fov_type" default="pinhole"/>
+  <arg name="perception_vertical_min" default="-0.1221730476"/>
+  <arg name="perception_vertical_max" default="0.9075712110"/>
+  <arg name="perception_sensor_to_body_R" default="1, 0, 0, 0, 1, 0, 0, 0, 1"/>
+
   <!-- main node -->
   <node pkg="exploration_manager" name="exploration_node" type="exploration_node" output="screen">
     <remap from ="/odom_world" to="$(arg odometry_topic)"/>
@@ -114,11 +120,15 @@
     <param name="frontier/min_view_finish_fraction" value="0.2" type="double"/>;
 
     <!-- Perception utils -->
+    <param name="perception_utils/fov_type" value="$(arg perception_fov_type)" type="string"/>;
     <param name="perception_utils/top_angle" value="1.0" type="double"/>;
     <param name="perception_utils/left_angle" value="1.55" type="double"/>;
     <param name="perception_utils/right_angle" value="1.55" type="double"/>;
     <param name="perception_utils/max_dist" value="10.0" type="double"/>;
     <param name="perception_utils/vis_dist" value="1.0" type="double"/>;
+    <param name="perception_utils/vertical_min" value="$(arg perception_vertical_min)" type="double"/>;
+    <param name="perception_utils/vertical_max" value="$(arg perception_vertical_max)" type="double"/>;
+    <rosparam param="perception_utils/sensor_to_body_R" subst_value="true">[$(arg perception_sensor_to_body_R)]</rosparam>
 
 
     <param name="heading_planner/yaw_diff" value="$(eval 30 * 3.1415926 / 180.0)" type="double"/>
