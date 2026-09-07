@@ -21,6 +21,8 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   nh.param("sdf_map/map_size_y", y_size, -1.0);
   nh.param("sdf_map/map_size_z", z_size, -1.0);
   nh.param("sdf_map/obstacles_inflation", mp_->obstacles_inflation_, -1.0);
+  nh.param("sdf_map/virtual_wall_enabled", mp_->virtual_wall_enabled_, false);
+  nh.param("sdf_map/virtual_wall_thickness", mp_->virtual_wall_thickness_, 0.0);
   nh.param("sdf_map/local_bound_inflate", mp_->local_bound_inflate_, 1.0);
   nh.param("sdf_map/local_map_margin", mp_->local_map_margin_, 1);
   nh.param("sdf_map/ground_height", mp_->ground_height_, 1.0);
@@ -29,6 +31,7 @@ void SDFMap::initMap(ros::NodeHandle& nh) {
   nh.param("sdf_map/signed_dist", mp_->signed_dist_, false);
 
   mp_->local_bound_inflate_ = max(mp_->resolution_, mp_->local_bound_inflate_);
+  mp_->virtual_wall_thickness_ = max(0.0, mp_->virtual_wall_thickness_);
   mp_->resolution_inv_ = 1 / mp_->resolution_;
   mp_->map_origin_ = Eigen::Vector3d(-x_size / 2.0, -y_size / 2.0, mp_->ground_height_);
   mp_->map_size_ = Eigen::Vector3d(x_size, y_size, z_size);
@@ -459,6 +462,48 @@ void SDFMap::clearAndInflateLocalMap() {
           }
         }
       }
+
+  // Treat every voxel outside the flight box as dangerous in the safety/inflation layer.
+  // Raw occupancy is intentionally left untouched so mapping outside the flight box is preserved.
+  if (mp_->virtual_wall_enabled_) {
+    // Only paint the six shell faces needed by ESDF instead of scanning the complete local volume.
+    const int wall_layers = max(1, int(ceil(mp_->virtual_wall_thickness_ / mp_->resolution_)));
+    auto mark_wall = [&](const Eigen::Vector3i& id) {
+      if (!isInMap(id)) return;
+      if ((id.array() < md_->local_bound_min_.array()).any() ||
+          (id.array() > md_->local_bound_max_.array()).any())
+        return;
+      md_->occupancy_buffer_inflate_[toAddress(id)] = 1;
+    };
+
+    const Eigen::Vector3i shell_min = mp_->box_min_ - Eigen::Vector3i::Constant(wall_layers);
+    const Eigen::Vector3i shell_max = mp_->box_max_ + Eigen::Vector3i::Constant(wall_layers - 1);
+    for (int layer = 0; layer < wall_layers; ++layer) {
+      const int x_low = mp_->box_min_(0) - 1 - layer;
+      const int x_high = mp_->box_max_(0) + layer;
+      for (int y = shell_min(1); y <= shell_max(1); ++y)
+        for (int z = shell_min(2); z <= shell_max(2); ++z) {
+          mark_wall(Eigen::Vector3i(x_low, y, z));
+          mark_wall(Eigen::Vector3i(x_high, y, z));
+        }
+
+      const int y_low = mp_->box_min_(1) - 1 - layer;
+      const int y_high = mp_->box_max_(1) + layer;
+      for (int x = shell_min(0); x <= shell_max(0); ++x)
+        for (int z = shell_min(2); z <= shell_max(2); ++z) {
+          mark_wall(Eigen::Vector3i(x, y_low, z));
+          mark_wall(Eigen::Vector3i(x, y_high, z));
+        }
+
+      const int z_low = mp_->box_min_(2) - 1 - layer;
+      const int z_high = mp_->box_max_(2) + layer;
+      for (int x = shell_min(0); x <= shell_max(0); ++x)
+        for (int y = shell_min(1); y <= shell_max(1); ++y) {
+          mark_wall(Eigen::Vector3i(x, y, z_low));
+          mark_wall(Eigen::Vector3i(x, y, z_high));
+        }
+    }
+  }
 
   // add virtual ceiling to limit flight height
   if (mp_->virtual_ceil_height_ > -0.5) {

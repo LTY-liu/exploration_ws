@@ -35,6 +35,12 @@ void MapROS::init() {
   node_.param("map_ros/show_occ_time", show_occ_time_, false);
   node_.param("map_ros/show_esdf_time", show_esdf_time_, false);
   node_.param("map_ros/show_all_map", show_all_map_, false);
+  node_.param("map_ros/show_outside_box", show_outside_box_, false);
+  node_.param("map_ros/show_boundary_wireframes", show_boundary_wireframes_, true);
+  node_.param("map_ros/boundary_line_width", boundary_line_width_, 0.06);
+  node_.param("map_ros/all_map_publish_period", all_map_publish_period_, 0.5);
+  boundary_line_width_ = max(0.01, boundary_line_width_);
+  all_map_publish_period_ = max(0.1, all_map_publish_period_);
   node_.param("map_ros/frame_id", frame_id_, string("world"));
 
   proj_points_.resize(640 * 480 / (skip_pixel_ * skip_pixel_));
@@ -67,6 +73,10 @@ void MapROS::init() {
   esdf_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/esdf", 10);
   update_range_pub_ = node_.advertise<visualization_msgs::Marker>("/sdf_map/update_range", 10);
   depth_pub_ = node_.advertise<sensor_msgs::PointCloud2>("/sdf_map/depth_cloud", 10);
+  map_boundary_pub_ =
+      node_.advertise<visualization_msgs::Marker>("/sdf_map/map_boundary", 1, true);
+  virtual_wall_pub_ =
+      node_.advertise<visualization_msgs::Marker>("/sdf_map/virtual_wall", 1, true);
 
   depth_sub_.reset(new message_filters::Subscriber<sensor_msgs::Image>(node_, "/map_ros/depth", 50));
   cloud_sub_.reset(
@@ -90,9 +100,17 @@ void MapROS::visCallback(const ros::TimerEvent& e) {
     // Limit the frequency of all map
     static double tpass = 0.0;
     tpass += (e.current_real - e.last_real).toSec();
-    if (tpass > 0.1) {
+    if (tpass > all_map_publish_period_) {
       publishMapAll();
       tpass = 0.0;
+    }
+  }
+  if (show_boundary_wireframes_) {
+    static double boundary_tpass = 0.0;
+    boundary_tpass += (e.current_real - e.last_real).toSec();
+    if (boundary_tpass > 0.5) {
+      publishBoundaryWireframes();
+      boundary_tpass = 0.0;
     }
   }
   // publishUnknown();
@@ -100,6 +118,59 @@ void MapROS::visCallback(const ros::TimerEvent& e) {
 
   // publishUpdateRange();
   // publishDepth();
+}
+
+void MapROS::publishBoundaryWireframes() {
+  const int edges[12][2] = {
+    { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 0 }, { 4, 5 }, { 5, 6 },
+    { 6, 7 }, { 7, 4 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 }
+  };
+
+  auto publish_wireframe = [&](ros::Publisher& pub, const string& ns, const Eigen::Vector3d& bmin,
+                               const Eigen::Vector3d& bmax, const Eigen::Vector3d& color,
+                               const double width) {
+    const Eigen::Vector3d corners[8] = {
+      Eigen::Vector3d(bmin(0), bmin(1), bmin(2)),
+      Eigen::Vector3d(bmax(0), bmin(1), bmin(2)),
+      Eigen::Vector3d(bmax(0), bmax(1), bmin(2)),
+      Eigen::Vector3d(bmin(0), bmax(1), bmin(2)),
+      Eigen::Vector3d(bmin(0), bmin(1), bmax(2)),
+      Eigen::Vector3d(bmax(0), bmin(1), bmax(2)),
+      Eigen::Vector3d(bmax(0), bmax(1), bmax(2)),
+      Eigen::Vector3d(bmin(0), bmax(1), bmax(2))
+    };
+
+    visualization_msgs::Marker marker;
+    marker.header.frame_id = frame_id_;
+    marker.header.stamp = ros::Time::now();
+    marker.ns = ns;
+    marker.id = 0;
+    marker.type = visualization_msgs::Marker::LINE_LIST;
+    marker.action = visualization_msgs::Marker::ADD;
+    marker.pose.orientation.w = 1.0;
+    marker.scale.x = width;
+    marker.color.r = color(0);
+    marker.color.g = color(1);
+    marker.color.b = color(2);
+    marker.color.a = 1.0;
+    for (const auto& edge : edges) {
+      for (int endpoint = 0; endpoint < 2; ++endpoint) {
+        const Eigen::Vector3d& corner = corners[edge[endpoint]];
+        geometry_msgs::Point point;
+        point.x = corner(0);
+        point.y = corner(1);
+        point.z = corner(2);
+        marker.points.push_back(point);
+      }
+    }
+    pub.publish(marker);
+  };
+
+  publish_wireframe(map_boundary_pub_, "map_boundary", map_->mp_->map_min_boundary_,
+                    map_->mp_->map_max_boundary_, Eigen::Vector3d(0.0, 1.0, 1.0),
+                    boundary_line_width_);
+  publish_wireframe(virtual_wall_pub_, "virtual_wall", map_->mp_->box_mind_, map_->mp_->box_maxd_,
+                    Eigen::Vector3d(1.0, 0.0, 0.1), boundary_line_width_ * 1.5);
 }
 
 void MapROS::updateESDFCallback(const ros::TimerEvent& /*event*/) {
@@ -217,9 +288,15 @@ void MapROS::proessDepthImage() {
 void MapROS::publishMapAll() {
   pcl::PointXYZ pt;
   pcl::PointCloud<pcl::PointXYZ> cloud1, cloud2;
-  for (int x = map_->mp_->box_min_(0) /* + 1 */; x < map_->mp_->box_max_(0); ++x)
-    for (int y = map_->mp_->box_min_(1) /* + 1 */; y < map_->mp_->box_max_(1); ++y)
-      for (int z = map_->mp_->box_min_(2) /* + 1 */; z < map_->mp_->box_max_(2); ++z) {
+  Eigen::Vector3i vis_min = map_->mp_->box_min_;
+  Eigen::Vector3i vis_max = map_->mp_->box_max_;
+  if (show_outside_box_) {
+    vis_min.setZero();
+    vis_max = map_->mp_->map_voxel_num_;
+  }
+  for (int x = vis_min(0); x < vis_max(0); ++x)
+    for (int y = vis_min(1); y < vis_max(1); ++y)
+      for (int z = vis_min(2); z < vis_max(2); ++z) {
         if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_) {
           Eigen::Vector3d pos;
           map_->indexToPos(Eigen::Vector3i(x, y, z), pos);
@@ -242,12 +319,13 @@ void MapROS::publishMapAll() {
   // Output time and known volumn
   double time_now = (ros::Time::now() - map_start_time_).toSec();
   double known_volumn = 0;
+  const double voxel_volume = map_->mp_->resolution_ * map_->mp_->resolution_ * map_->mp_->resolution_;
 
   for (int x = map_->mp_->box_min_(0) /* + 1 */; x < map_->mp_->box_max_(0); ++x)
     for (int y = map_->mp_->box_min_(1) /* + 1 */; y < map_->mp_->box_max_(1); ++y)
       for (int z = map_->mp_->box_min_(2) /* + 1 */; z < map_->mp_->box_max_(2); ++z) {
         if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->clamp_min_log_ - 1e-3)
-          known_volumn += 0.1 * 0.1 * 0.1;
+          known_volumn += voxel_volume;
       }
 
   ofstream file("/home/boboyu/workspaces/plan_ws/src/fast_planner/exploration_manager/resource/"
@@ -265,10 +343,14 @@ void MapROS::publishMapLocal() {
   map_->boundIndex(min_cut);
   map_->boundIndex(max_cut);
 
-  // for (int z = min_cut(2); z <= max_cut(2); ++z)
+  if (!show_outside_box_) {
+    min_cut = min_cut.cwiseMax(map_->mp_->box_min_);
+    max_cut = max_cut.cwiseMin(map_->mp_->box_max_ - Eigen::Vector3i::Ones());
+  }
+
   for (int x = min_cut(0); x <= max_cut(0); ++x)
     for (int y = min_cut(1); y <= max_cut(1); ++y)
-      for (int z = map_->mp_->box_min_(2); z < map_->mp_->box_max_(2); ++z) {
+      for (int z = min_cut(2); z <= max_cut(2); ++z) {
         if (map_->md_->occupancy_buffer_[map_->toAddress(x, y, z)] > map_->mp_->min_occupancy_log_) {
           // Occupied cells
           Eigen::Vector3d pos;

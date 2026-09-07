@@ -167,6 +167,10 @@ int FastExplorationFSM::callExplorationPlanner() {
 
   if (res == SUCCEED) {
     auto info = &planner_manager_->local_data_;
+    if (!planner_manager_->checkTrajSafety(info->position_traj_, "pre-publish B-spline")) {
+      ROS_ERROR("[Safety] Exploration trajectory failed the final pre-publish check.");
+      return FAIL;
+    }
     info->start_time_ = (ros::Time::now() - time_r).toSec() > 0 ? ros::Time::now() : time_r;
 
     bspline::Bspline bspline;

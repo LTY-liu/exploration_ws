@@ -245,7 +245,7 @@ int FastExplorationManager::planExploreMotion(
   if (len < radius_close) {
     // Next viewpoint is very close, no need to search kinodynamic path, just use waypoints-based
     // optimization
-    planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb);
+    if (!planner_manager_->planExploreTraj(ed_->path_next_goal_, vel, acc, time_lb)) return FAIL;
     ed_->next_goal_ = next_pos;
 
   } else if (len > radius_far) {
@@ -260,7 +260,7 @@ int FastExplorationManager::planExploreMotion(
       truncated_path.push_back(cur_pt);
     }
     ed_->next_goal_ = truncated_path.back();
-    planner_manager_->planExploreTraj(truncated_path, vel, acc, time_lb);
+    if (!planner_manager_->planExploreTraj(truncated_path, vel, acc, time_lb)) return FAIL;
     // if (!planner_manager_->kinodynamicReplan(
     //         pos, vel, acc, ed_->next_goal_, Vector3d(0, 0, 0), time_lb))
     //   return FAIL;

@@ -7,6 +7,7 @@
 #include <ros/ros.h>
 #include <poly_traj/polynomial_traj.h>
 #include <active_perception/perception_utils.h>
+#include <cmath>
 
 #include <plan_manage/backward.hpp>
 namespace backward {
@@ -45,6 +46,119 @@ double energy;
 Eigen::Matrix3d R_loop;
 Eigen::Vector3d T_loop;
 bool isLoopCorrection = false;
+
+// Independent local-coordinate command gate. This does not depend on the planner map.
+bool safety_gate_enabled_ = true;
+bool odom_received_ = false;
+bool safety_hold_active_ = false;
+Eigen::Vector3d safety_box_min_;
+Eigen::Vector3d safety_box_max_;
+double safety_braking_margin_ = 0.3;
+double safety_odom_timeout_ = 0.2;
+double safety_trajectory_check_dt_ = 0.02;
+ros::Time last_odom_receive_time_;
+
+bool isInsideSafetyBox(const Eigen::Vector3d& pos) {
+  return pos.allFinite() && (pos.array() > safety_box_min_.array()).all() &&
+         (pos.array() < safety_box_max_.array()).all();
+}
+
+bool validateBsplineAgainstSafetyBox(NonUniformBspline& traj) {
+  if (!safety_gate_enabled_) return true;
+
+  const double duration = traj.getTimeSum();
+  if (!std::isfinite(duration) || duration <= 0.0) {
+    ROS_ERROR("[Safety gate] Reject B-spline with invalid duration: %.6f", duration);
+    return false;
+  }
+
+  for (double t = 0.0; t < duration; t += safety_trajectory_check_dt_) {
+    const Eigen::Vector3d pos = traj.evaluateDeBoorT(t);
+    if (!isInsideSafetyBox(pos)) {
+      ROS_ERROR_STREAM("[Safety gate] Reject B-spline outside local safety box: t=" << t
+                       << ", pos=" << pos.transpose());
+      return false;
+    }
+  }
+
+  const Eigen::Vector3d end_pos = traj.evaluateDeBoorT(duration);
+  if (!isInsideSafetyBox(end_pos)) {
+    ROS_ERROR_STREAM("[Safety gate] Reject B-spline endpoint outside local safety box: pos="
+                     << end_pos.transpose());
+    return false;
+  }
+  return true;
+}
+
+bool commandMovesOutwardNearBoundary(
+    const Eigen::Vector3d& current, const Eigen::Vector3d& target, const Eigen::Vector3d& velocity) {
+  for (int axis = 0; axis < 3; ++axis) {
+    if (current(axis) - safety_box_min_(axis) <= safety_braking_margin_ &&
+        (velocity(axis) < 0.0 || target(axis) < current(axis)))
+      return true;
+    if (safety_box_max_(axis) - current(axis) <= safety_braking_margin_ &&
+        (velocity(axis) > 0.0 || target(axis) > current(axis)))
+      return true;
+  }
+  return false;
+}
+
+void publishSafetyHold(const ros::Time& stamp, const string& reason) {
+  ROS_ERROR_STREAM_THROTTLE(1.0, "[Safety gate] Command blocked: " << reason);
+  receive_traj_ = false;
+  safety_hold_active_ = true;
+  if (!odom_received_) return;
+
+  quadrotor_msgs::PositionCommand hold = cmd;
+  hold.header.stamp = stamp;
+  hold.position = odom.pose.pose.position;
+  hold.velocity.x = hold.velocity.y = hold.velocity.z = 0.0;
+  hold.acceleration.x = hold.acceleration.y = hold.acceleration.z = 0.0;
+  hold.yaw_dot = 0.0;
+  pos_cmd_pub.publish(hold);
+}
+
+bool publishPositionCommandSafely(const ros::Time& stamp) {
+  if (!safety_gate_enabled_) {
+    pos_cmd_pub.publish(cmd);
+    return true;
+  }
+  if (!odom_received_) {
+    publishSafetyHold(stamp, "odometry has not been received");
+    return false;
+  }
+  if ((stamp - last_odom_receive_time_).toSec() > safety_odom_timeout_) {
+    publishSafetyHold(stamp, "odometry timeout");
+    return false;
+  }
+
+  Eigen::Vector3d current(odom.pose.pose.position.x, odom.pose.pose.position.y,
+                          odom.pose.pose.position.z);
+  Eigen::Vector3d target(cmd.position.x, cmd.position.y, cmd.position.z);
+  Eigen::Vector3d velocity(cmd.velocity.x, cmd.velocity.y, cmd.velocity.z);
+  // The safety box is defined in the planning/world frame. Convert corrected VIO-frame values
+  // back to world before checking when loop correction is enabled.
+  if (isLoopCorrection) {
+    current = R_loop * current + T_loop;
+    target = R_loop * target + T_loop;
+    velocity = R_loop * velocity;
+  }
+  if (!isInsideSafetyBox(current)) {
+    publishSafetyHold(stamp, "vehicle is outside the local safety box");
+    return false;
+  }
+  if (!isInsideSafetyBox(target)) {
+    publishSafetyHold(stamp, "position command is outside the local safety box");
+    return false;
+  }
+  if (commandMovesOutwardNearBoundary(current, target, velocity)) {
+    publishSafetyHold(stamp, "outward command inside braking margin");
+    return false;
+  }
+
+  pos_cmd_pub.publish(cmd);
+  return true;
+}
 
 double calcPathLength(const vector<Eigen::Vector3d>& path) {
   if (path.empty()) return 0;
@@ -161,7 +275,7 @@ void drawCmd(const Eigen::Vector3d& pos, const Eigen::Vector3d& vec, const int& 
   mk_state.color.a = color(3);
 
   cmd_vis_pub.publish(mk_state);
-}.cache
+}
 
 void replanCallback(std_msgs::Empty msg) {
   // Informed of new replan, end the current traj after some time
@@ -180,6 +294,8 @@ void newCallback(std_msgs::Empty msg) {
 void odomCallbck(const nav_msgs::Odometry& msg) {
   if (msg.child_frame_id == "X" || msg.child_frame_id == "O") return;
   odom = msg;
+  odom_received_ = true;
+  last_odom_receive_time_ = ros::Time::now();
   traj_real_.push_back(
       Eigen::Vector3d(odom.pose.pose.position.x, odom.pose.pose.position.y, odom.pose.pose.position.z));
 
@@ -228,6 +344,10 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   }
   NonUniformBspline pos_traj(pos_pts, msg->order, 0.1);
   pos_traj.setKnot(knots);
+  if (!validateBsplineAgainstSafetyBox(pos_traj)) {
+    publishSafetyHold(ros::Time::now(), "received B-spline crosses the local safety box");
+    return;
+  }
 
   Eigen::MatrixXd yaw_pts(msg->yaw_pts.size(), 1);
   for (int i = 0; i < msg->yaw_pts.size(); ++i)
@@ -246,6 +366,7 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
   traj_duration_ = traj_[0].getTimeSum();
 
   receive_traj_ = true;
+  safety_hold_active_ = false;
 
   // Record the start time of flight
   if (start_time.isZero()) {
@@ -255,6 +376,10 @@ void bsplineCallback(const bspline::BsplineConstPtr& msg) {
 }
 
 void cmdCallback(const ros::TimerEvent& e) {
+  if (safety_hold_active_) {
+    publishSafetyHold(ros::Time::now(), "latched local safety hold");
+    return;
+  }
   // No publishing before receive traj data
   if (!receive_traj_) return;
 
@@ -312,7 +437,7 @@ void cmdCallback(const ros::TimerEvent& e) {
   cmd.acceleration.z = acc(2);
   cmd.yaw = yaw;
   cmd.yaw_dot = yawdot;
-  pos_cmd_pub.publish(cmd);
+  if (!publishPositionCommandSafely(time_now)) return;
 
   // Draw cmd
   // Eigen::Vector3d dir(cos(yaw), sin(yaw), 0.0);
@@ -426,7 +551,7 @@ void test() {
     cmd.acceleration.x = a(0);
     cmd.acceleration.y = a(1);
     cmd.acceleration.z = a(2);
-    pos_cmd_pub.publish(cmd);
+    if (!publishPositionCommandSafely(ros::Time::now())) return;
 
     ros::Duration(0.02).sleep();
     tn = (ros::Time::now() - t1).toSec();
@@ -454,6 +579,28 @@ int main(int argc, char** argv) {
   nh.param("traj_server/pub_traj_id", pub_traj_id_, -1);
   nh.param("fsm/replan_time", replan_time_, 0.1);
   nh.param("loop_correction/isLoopCorrection", isLoopCorrection, false);
+  nh.param("safety_gate/enabled", safety_gate_enabled_, true);
+  nh.param("safety_gate/box_min_x", safety_box_min_[0], -1.0);
+  nh.param("safety_gate/box_min_y", safety_box_min_[1], -1.0);
+  nh.param("safety_gate/box_min_z", safety_box_min_[2], -1.0);
+  nh.param("safety_gate/box_max_x", safety_box_max_[0], 1.0);
+  nh.param("safety_gate/box_max_y", safety_box_max_[1], 1.0);
+  nh.param("safety_gate/box_max_z", safety_box_max_[2], 1.0);
+  nh.param("safety_gate/braking_margin", safety_braking_margin_, 0.3);
+  nh.param("safety_gate/odom_timeout", safety_odom_timeout_, 0.2);
+  nh.param("safety_gate/trajectory_check_dt", safety_trajectory_check_dt_, 0.02);
+
+  if (safety_gate_enabled_ &&
+      (!(safety_box_min_.array() < safety_box_max_.array()).all() ||
+       safety_braking_margin_ < 0.0 || safety_odom_timeout_ <= 0.0 ||
+       safety_trajectory_check_dt_ <= 0.0)) {
+    ROS_FATAL_STREAM("[Safety gate] Invalid safety parameters. min=" << safety_box_min_.transpose()
+                     << ", max=" << safety_box_max_.transpose()
+                     << ", braking_margin=" << safety_braking_margin_
+                     << ", odom_timeout=" << safety_odom_timeout_
+                     << ", trajectory_check_dt=" << safety_trajectory_check_dt_);
+    return 1;
+  }
 
   Eigen::Vector3d init_pos;
   nh.param("traj_server/init_x", init_pos[0], 0.0);
@@ -488,25 +635,8 @@ int main(int argc, char** argv) {
 
   percep_utils_.reset(new PerceptionUtils(nh));
 
-  // test();
-  // Initialization for exploration, move upward and downward
-  for (int i = 0; i < 100; ++i) {
-    cmd.position.z += 0.01;
-    pos_cmd_pub.publish(cmd);
-    ros::Duration(0.01).sleep();
-  }
-  for (int i = 0; i < 100; ++i) {
-    cmd.position.z -= 0.01;
-    pos_cmd_pub.publish(cmd);
-    ros::Duration(0.01).sleep();
-  }
-  // ros::Duration(1.0).sleep();
-  // for (int i = 0; i < 100; ++i)
-  // {
-  //   cmd.position.x -= 0.01;
-  //   pos_cmd_pub.publish(cmd);
-  //   ros::Duration(0.01).sleep();
-  // }
+  // The legacy startup up/down command sequence is intentionally disabled. Commands are only
+  // published after valid odometry and a validated trajectory have been received.
 
   R_loop = Eigen::Quaterniond(1, 0, 0, 0).toRotationMatrix();
   T_loop = Eigen::Vector3d(0, 0, 0);
