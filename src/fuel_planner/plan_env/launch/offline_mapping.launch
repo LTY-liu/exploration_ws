@@ -1,0 +1,53 @@
+<launch>
+  <!-- 后期精建：resolution 从 0.05 起。注意 0.05 比 0.1 体素数多 8 倍，内存大，建议台式机跑 -->
+  <arg name="resolution" default="0.05"/>
+  <!-- map_size 必须覆盖整条录制轨迹(包括往返)，按你实际飞的区域改 -->
+  <arg name="map_size_x" default="30.0"/>
+  <arg name="map_size_y" default="50.0"/>
+  <arg name="map_size_z" default="5.0"/>
+
+  <!-- bag 里的话题名。若你录的是别的名字，只改这里 -->
+  <arg name="cloud_topic" default="/cloud_registered"/>
+  <arg name="pose_topic"  default="/map_ros/pose"/>
+
+  <node pkg="plan_env" name="offline_mapper" type="offline_mapper" output="screen">
+    <!-- map_ros 逻辑话题 → bag 实际话题 -->
+    <remap from="/map_ros/cloud" to="$(arg cloud_topic)"/>
+    <remap from="/map_ros/pose"  to="$(arg pose_topic)"/>
+    <remap from="/map_ros/depth" to="/no_depth"/>  <!-- 无人发深度，深度那路自然静默 -->
+
+    <param name="sdf_map/resolution" value="$(arg resolution)"/>
+    <param name="sdf_map/map_size_x" value="$(arg map_size_x)"/>
+    <param name="sdf_map/map_size_y" value="$(arg map_size_y)"/>
+    <param name="sdf_map/map_size_z" value="$(arg map_size_z)"/>
+    <param name="sdf_map/obstacles_inflation" value="0.299"/>
+    <!-- 离线重建干净地图:关掉虚拟安全墙,ESDF 只反映真实障碍。
+         若想和在线完全一致再开 true 并给 box_* -->
+    <param name="sdf_map/virtual_wall_enabled" value="false"/>
+    <param name="sdf_map/local_bound_inflate"  value="0.5"/>
+    <param name="sdf_map/local_map_margin"     value="50"/>
+    <param name="sdf_map/ground_height"        value="-1.0"/>
+    <param name="sdf_map/default_dist"         value="0.0"/>
+    <param name="sdf_map/p_hit"  value="0.65"/>
+    <param name="sdf_map/p_miss" value="0.35"/>
+    <param name="sdf_map/p_min"  value="0.12"/>
+    <param name="sdf_map/p_max"  value="0.90"/>
+    <param name="sdf_map/p_occ"  value="0.80"/>
+    <param name="sdf_map/min_ray_length" value="0.5"/>
+    <param name="sdf_map/max_ray_length" value="10.0"/>
+    <param name="sdf_map/virtual_ceil_height" value="-10.0"/>
+    <param name="sdf_map/optimistic" value="false"/>
+    <param name="sdf_map/signed_dist" value="false"/>
+
+    <param name="map_ros/esdf_slice_height" value="0.3"/>
+    <!-- 必须与 algorithm.xml 一致!默认 -0.1/-0.1 会把 z>-0.1 的点全滤掉,地图显示为空 -->
+    <param name="map_ros/visualization_truncate_height" value="10.09"/>
+    <param name="map_ros/visualization_truncate_low" value="-2.0"/>
+    <param name="map_ros/all_map_publish_period" value="0.5"/>
+    <param name="map_ros/boundary_line_width" value="0.06"/>
+    <param name="map_ros/show_all_map" value="true"/>
+    <param name="map_ros/show_outside_box" value="true"/>
+    <param name="map_ros/show_boundary_wireframes" value="true"/>
+    <param name="map_ros/frame_id" value="world"/>
+  </node>
+</launch>

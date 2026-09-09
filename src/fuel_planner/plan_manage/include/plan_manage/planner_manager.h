@@ -31,7 +31,7 @@ public:
   bool kinodynamicReplan(const Eigen::Vector3d& start_pt, const Eigen::Vector3d& start_vel,
                          const Eigen::Vector3d& start_acc, const Eigen::Vector3d& end_pt,
                          const Eigen::Vector3d& end_vel, const double& time_lb = -1);
-  void planExploreTraj(const vector<Eigen::Vector3d>& tour, const Eigen::Vector3d& cur_vel,
+  bool planExploreTraj(const vector<Eigen::Vector3d>& tour, const Eigen::Vector3d& cur_vel,
                        const Eigen::Vector3d& cur_acc, const double& time_lb = -1);
   bool planGlobalTraj(const Eigen::Vector3d& start_pos);
   bool topoReplan(bool collide);
@@ -44,6 +44,7 @@ public:
   void setGlobalWaypoints(vector<Eigen::Vector3d>& waypoints);
 
   bool checkTrajCollision(double& distance);
+  bool checkTrajSafety(NonUniformBspline& traj, const string& context = "trajectory");
   void calcNextYaw(const double& last_yaw, double& yaw);
 
   PlanParameters pp_;
@@ -62,6 +63,9 @@ private:
   vector<BsplineOptimizer::Ptr> bspline_optimizers_;
 
   void updateTrajInfo();
+  bool isPositionSafe(const Eigen::Vector3d& pos, string& reason);
+  double safety_check_dt_;
+  double safety_check_distance_;
 
   // topology guided optimization
 

@@ -5,7 +5,15 @@
   <arg name="map_size_z" value="4.0"/>
   <arg name="init_x" value="0"/>
   <arg name="init_y" value="0"/>
-  <arg name="init_z" value="1.0"/>
+  <arg name="init_z" value="0.6"/>
+
+  <!-- 飞行安全框：框外一律视为危险区域。数值必须按 FAST-LIO 坐标实测后再首飞。 -->
+  <arg name="box_min_x" value="-2.8"/>
+  <arg name="box_min_y" value="-2.2"/>
+  <arg name="box_min_z" value="0.0"/>
+  <arg name="box_max_x" value="2.8"/>
+  <arg name="box_max_y" value="2.2"/>
+  <arg name="box_max_z" value="2.5"/>
 
   <!-- 真机定位话题:FAST-LIO 高频里程计 -->
   <arg name="odom_topic" value="/Odom_high_freq"/>
@@ -16,14 +24,13 @@
     <arg name="map_size_y_" value="$(arg map_size_y)"/>
     <arg name="map_size_z_" value="$(arg map_size_z)"/>
 
-    <!-- 探索范围硬边界:必须盖住整个场地(5×6m+四周网),并在网外留余量
-         网才在 box 内才会被当成前沿去飞近建图;否则会提前 finish exploration -->
-    <arg name="box_min_x" value="-3.0"/>
-    <arg name="box_min_y" value="-3.5"/>
-    <arg name="box_min_z" value="0.0"/>
-    <arg name="box_max_x" value="3.0"/>
-    <arg name="box_max_y" value="3.5"/>
-    <arg name="box_max_z" value="2.5"/>
+    <!-- 地图可大于围网，但飞行 box 必须位于围网内并包含制动/定位/机体余量。 -->
+    <arg name="box_min_x" value="$(arg box_min_x)"/>
+    <arg name="box_min_y" value="$(arg box_min_y)"/>
+    <arg name="box_min_z" value="$(arg box_min_z)"/>
+    <arg name="box_max_x" value="$(arg box_max_x)"/>
+    <arg name="box_max_y" value="$(arg box_max_y)"/>
+    <arg name="box_max_z" value="$(arg box_max_z)"/>
 
     <!-- 真机话题:全部指向 FAST-LIO / fuel_bridge -->
     <arg name="odometry_topic" value="$(arg odom_topic)"/>
@@ -65,6 +72,21 @@
     <param name="traj_server/init_x" value="$(arg init_x)" type="double"/>
     <param name="traj_server/init_y" value="$(arg init_y)" type="double"/>
     <param name="traj_server/init_z" value="$(arg init_z)" type="double"/>
+
+    <!-- 独立本地坐标安全门：不依赖地图点云，直接拦截越界 /position_cmd。 -->
+    <param name="safety_gate/enabled" value="true" type="bool"/>
+    <param name="safety_gate/box_min_x" value="$(arg box_min_x)" type="double"/>
+    <param name="safety_gate/box_min_y" value="$(arg box_min_y)" type="double"/>
+    <param name="safety_gate/box_min_z" value="$(arg box_min_z)" type="double"/>
+    <param name="safety_gate/box_max_x" value="$(arg box_max_x)" type="double"/>
+    <param name="safety_gate/box_max_y" value="$(arg box_max_y)" type="double"/>
+    <param name="safety_gate/box_max_z" value="$(arg box_max_z)" type="double"/>
+    <!-- 距边界小于该距离时，拦截继续向外运动的指令。 -->
+    <param name="safety_gate/braking_margin" value="0.30" type="double"/>
+    <!-- 超过该时长未收到新里程计，就停止执行轨迹并锁定当前位置。 -->
+    <param name="safety_gate/odom_timeout" value="0.20" type="double"/>
+    <!-- traj_server 对收到的 B 样条做边界检查时的时间采样间隔。 -->
+    <param name="safety_gate/trajectory_check_dt" value="0.02" type="double"/>
 
     <!-- 与 exploration_node 使用同一 MID360 可见性模型 -->
     <param name="perception_utils/fov_type" value="omni_lidar" type="string"/>

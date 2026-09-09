@@ -5,4 +5,4 @@ rosrun mavros mavcmd long 511 31 5000 0 0 0 0 0 & sleep 1;
 
 source ~/exploration_ws/devel/setup.bash;
 
-roslaunch livox_ros_driver2 msg_MID360s.launch;
+roslaunch livox_ros_driver2 msg_MID360.launch;

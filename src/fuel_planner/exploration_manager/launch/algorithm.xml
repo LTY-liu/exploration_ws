@@ -36,12 +36,16 @@
     <remap from ="/map_ros/depth" to = "$(arg depth_topic)"/>
     <remap from ="/map_ros/cloud" to="$(arg cloud_topic)"/>
 
+    <!-- Safety configuration keeps voxel size >= 0.05 m; current value is 0.10 m. -->
     <param name="sdf_map/resolution"      value="0.1" /> 
     <param name="sdf_map/map_size_x"   value="$(arg map_size_x_)" /> 
     <param name="sdf_map/map_size_y"   value="$(arg map_size_y_)" /> 
     <param name="sdf_map/map_size_z"   value="$(arg map_size_z_)" /> 
     <!-- <param name="sdf_map/obstacles_inflation"     value="0.099" />  -->
-    <param name="sdf_map/obstacles_inflation"     value="0.199" /> 
+    <param name="sdf_map/obstacles_inflation"     value="0.299" />
+    <!-- Outside box is dangerous. Thickness 0 still paints one ESDF shell layer. -->
+    <param name="sdf_map/virtual_wall_enabled" value="true" type="bool"/>
+    <param name="sdf_map/virtual_wall_thickness" value="0.0" type="double"/>
     <param name="sdf_map/local_bound_inflate"    value="0.5"/>
     <param name="sdf_map/local_map_margin" value="50"/>
     <param name="sdf_map/ground_height"        value="-1.0"/>
@@ -79,6 +83,11 @@
     <param name="map_ros/show_occ_time"  value="false"/>
     <param name="map_ros/show_esdf_time" value="false"/>
     <param name="map_ros/show_all_map" value="true"/>
+    <!-- Show real occupancy outside box; virtual-wall voxels stay out of occupancy topics. -->
+    <param name="map_ros/show_outside_box" value="true" type="bool"/>
+    <param name="map_ros/show_boundary_wireframes" value="true" type="bool"/>
+    <param name="map_ros/boundary_line_width" value="0.06" type="double"/>
+    <param name="map_ros/all_map_publish_period" value="0.50" type="double"/>
     <param name="map_ros/frame_id"      value="world"/>
 
     <!-- Fsm -->
@@ -154,6 +163,9 @@
     <param name="manager/use_optimization" value="true" type="bool"/>
     <param name="manager/use_active_perception" value="true" type="bool"/>
     <param name="manager/min_time" value="true" type="bool"/>
+    <!-- 运行中/发布前轨迹安全采样周期；前视检查累计到 6 m 或轨迹末端。 -->
+    <param name="manager/safety_check_dt" value="0.02" type="double"/>
+    <param name="manager/safety_check_distance" value="6.0" type="double"/>
 
   <!-- kinodynamic path searching -->
     <param name="search/max_tau" value="0.8" type="double"/>

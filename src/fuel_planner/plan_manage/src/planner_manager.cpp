@@ -4,6 +4,8 @@
 #include <plan_env/raycast.h>
 
 #include <thread>
+#include <cmath>
+#include <stdexcept>
 #include <pcl/point_cloud.h>
 #include <pcl/point_types.h>
 #include <pcl_conversions/pcl_conversions.h>
@@ -34,6 +36,13 @@ void FastPlannerManager::initPlanModules(ros::NodeHandle& nh) {
   nh.param("manager/control_points_distance", pp_.ctrl_pt_dist, -1.0);
   nh.param("manager/bspline_degree", pp_.bspline_degree_, 3);
   nh.param("manager/min_time", pp_.min_time_, false);
+  nh.param("manager/safety_check_dt", safety_check_dt_, 0.02);
+  nh.param("manager/safety_check_distance", safety_check_distance_, 6.0);
+  if (safety_check_dt_ <= 0.0 || safety_check_distance_ <= 0.0) {
+    ROS_FATAL("Invalid manager safety parameters: check_dt=%.3f, check_distance=%.3f",
+              safety_check_dt_, safety_check_distance_);
+    throw std::invalid_argument("invalid manager safety parameters");
+  }
 
   bool use_geometric_path, use_kinodynamic_path, use_topo_path, use_optimization,
       use_active_perception;
@@ -94,26 +103,87 @@ void FastPlannerManager::setGlobalWaypoints(vector<Eigen::Vector3d>& waypoints) 
 }
 
 bool FastPlannerManager::checkTrajCollision(double& distance) {
-  double t_now = (ros::Time::now() - local_data_.start_time_).toSec();
+  double t_now = max(0.0, (ros::Time::now() - local_data_.start_time_).toSec());
+
+  if (t_now >= local_data_.duration_) return true;
 
   Eigen::Vector3d cur_pt = local_data_.position_traj_.evaluateDeBoorT(t_now);
+  string reason;
+  if (!isPositionSafe(cur_pt, reason)) {
+    distance = 0.0;
+    ROS_ERROR_STREAM("[Safety] Executing trajectory is unsafe at current position: " << reason
+                     << ", pos=" << cur_pt.transpose());
+    return false;
+  }
+
   double radius = 0.0;
   Eigen::Vector3d fut_pt;
-  double fut_t = 0.02;
+  double fut_t = safety_check_dt_;
 
-  while (radius < 6.0 && t_now + fut_t < local_data_.duration_) {
+  while (radius < safety_check_distance_ && t_now + fut_t < local_data_.duration_) {
     fut_pt = local_data_.position_traj_.evaluateDeBoorT(t_now + fut_t);
-    // double dist = edt_environment_->sdf_map_->getDistance(fut_pt);
-    if (sdf_map_->getInflateOccupancy(fut_pt) == 1) {
+    if (!isPositionSafe(fut_pt, reason)) {
       distance = radius;
-      // std::cout << "collision at: " << fut_pt.transpose() << ", dist: " << dist << std::endl;
-      std::cout << "collision at: " << fut_pt.transpose() << std::endl;
+      ROS_ERROR_STREAM("[Safety] Executing trajectory is unsafe: " << reason
+                       << ", pos=" << fut_pt.transpose() << ", distance=" << radius);
       return false;
     }
     radius = (fut_pt - cur_pt).norm();
-    fut_t += 0.02;
+    fut_t += safety_check_dt_;
   }
 
+  return true;
+}
+
+bool FastPlannerManager::isPositionSafe(const Eigen::Vector3d& pos, string& reason) {
+  if (!pos.allFinite()) {
+    reason = "NON_FINITE";
+    return false;
+  }
+  if (!sdf_map_->isInMap(pos)) {
+    reason = "OUT_OF_MAP";
+    return false;
+  }
+  if (!sdf_map_->isInBox(pos)) {
+    reason = "OUT_OF_BOX";
+    return false;
+  }
+  if (sdf_map_->getOccupancy(pos) == SDFMap::UNKNOWN) {
+    reason = "UNKNOWN";
+    return false;
+  }
+  if (sdf_map_->getInflateOccupancy(pos) == 1) {
+    reason = "INFLATED_OCCUPIED";
+    return false;
+  }
+  reason = "SAFE";
+  return true;
+}
+
+bool FastPlannerManager::checkTrajSafety(
+    NonUniformBspline& traj, const string& context) {
+  const double duration = traj.getTimeSum();
+  if (!std::isfinite(duration) || duration <= 0.0) {
+    ROS_ERROR_STREAM("[Safety] Reject " << context << ": invalid duration=" << duration);
+    return false;
+  }
+
+  string reason;
+  for (double t = 0.0; t < duration; t += safety_check_dt_) {
+    const Eigen::Vector3d pos = traj.evaluateDeBoorT(t);
+    if (!isPositionSafe(pos, reason)) {
+      ROS_ERROR_STREAM("[Safety] Reject " << context << ": " << reason << ", t=" << t
+                       << ", pos=" << pos.transpose());
+      return false;
+    }
+  }
+
+  const Eigen::Vector3d end_pos = traj.evaluateDeBoorT(duration);
+  if (!isPositionSafe(end_pos, reason)) {
+    ROS_ERROR_STREAM("[Safety] Reject " << context << ": " << reason << ", t=" << duration
+                     << ", pos=" << end_pos.transpose());
+    return false;
+  }
   return true;
 }
 
@@ -182,7 +252,9 @@ bool FastPlannerManager::kinodynamicReplan(const Eigen::Vector3d& start_pt,
   if (time_lb > 0) bspline_optimizers_[0]->setTimeLowerBound(time_lb);
 
   bspline_optimizers_[0]->optimize(ctrl_pts, ts, cost_function, 1, 1);
-  local_data_.position_traj_.setUniformBspline(ctrl_pts, pp_.bspline_degree_, ts);
+  NonUniformBspline candidate_traj(ctrl_pts, pp_.bspline_degree_, ts);
+  if (!checkTrajSafety(candidate_traj, "kinodynamic B-spline")) return false;
+  local_data_.position_traj_ = candidate_traj;
 
   vector<Eigen::Vector3d> start2, end2;
   local_data_.position_traj_.getBoundaryStates(2, 0, start2, end2);
@@ -263,9 +335,12 @@ bool FastPlannerManager::kinodynamicReplan(const Eigen::Vector3d& start_pt,
   return true;
 }
 
-void FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
+bool FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
     const Eigen::Vector3d& cur_vel, const Eigen::Vector3d& cur_acc, const double& time_lb) {
-  if (tour.empty()) ROS_ERROR("Empty path to traj planner");
+  if (tour.empty()) {
+    ROS_ERROR("Empty path to traj planner");
+    return false;
+  }
 
   // Generate traj through waypoints-based method
   const int pt_num = tour.size();
@@ -310,9 +385,12 @@ void FastPlannerManager::planExploreTraj(const vector<Eigen::Vector3d>& tour,
   if (time_lb > 0) bspline_optimizers_[0]->setTimeLowerBound(time_lb);
 
   bspline_optimizers_[0]->optimize(ctrl_pts, dt, cost_func, 1, 1);
-  local_data_.position_traj_.setUniformBspline(ctrl_pts, pp_.bspline_degree_, dt);
+  NonUniformBspline candidate_traj(ctrl_pts, pp_.bspline_degree_, dt);
+  if (!checkTrajSafety(candidate_traj, "exploration B-spline")) return false;
+  local_data_.position_traj_ = candidate_traj;
 
   updateTrajInfo();
+  return true;
 }
 
 // !SECTION

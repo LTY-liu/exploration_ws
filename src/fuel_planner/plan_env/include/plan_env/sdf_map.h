@@ -90,6 +90,8 @@ struct MapParam {
   Eigen::Vector3i map_voxel_num_;
   double resolution_, resolution_inv_;
   double obstacles_inflation_;
+  bool virtual_wall_enabled_;
+  double virtual_wall_thickness_;
   double virtual_ceil_height_, ground_height_;
   Eigen::Vector3i box_min_, box_max_;
   Eigen::Vector3d box_mind_, box_maxd_;
@@ -216,6 +218,7 @@ inline void SDFMap::setOccupied(const Eigen::Vector3d& pos, const int& occ) {
 
 inline int SDFMap::getInflateOccupancy(const Eigen::Vector3i& id) {
   if (!isInMap(id)) return -1;
+  if (mp_->virtual_wall_enabled_ && !isInBox(id)) return 1;
   return int(md_->occupancy_buffer_inflate_[toAddress(id)]);
 }
 
