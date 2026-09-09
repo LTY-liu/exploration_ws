@@ -57,3 +57,12 @@ add_executable(obj_generator
     )
 target_link_libraries(obj_generator 
     ${catkin_LIBRARIES})
+
+add_executable(offline_mapper
+    src/offline_mapper.cpp
+    )
+target_link_libraries(offline_mapper
+    plan_env
+    ${catkin_LIBRARIES}
+    ${PCL_LIBRARIES}
+    )

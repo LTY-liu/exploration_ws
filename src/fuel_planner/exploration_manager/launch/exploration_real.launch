@@ -5,14 +5,14 @@
   <arg name="map_size_z" value="4.0"/>
   <arg name="init_x" value="0"/>
   <arg name="init_y" value="0"/>
-  <arg name="init_z" value="1.0"/>
+  <arg name="init_z" value="0.6"/>
 
   <!-- 飞行安全框：框外一律视为危险区域。数值必须按 FAST-LIO 坐标实测后再首飞。 -->
-  <arg name="box_min_x" value="-3.0"/>
-  <arg name="box_min_y" value="-3.5"/>
+  <arg name="box_min_x" value="-2.8"/>
+  <arg name="box_min_y" value="-2.2"/>
   <arg name="box_min_z" value="0.0"/>
-  <arg name="box_max_x" value="3.0"/>
-  <arg name="box_max_y" value="3.5"/>
+  <arg name="box_max_x" value="2.8"/>
+  <arg name="box_max_y" value="2.2"/>
   <arg name="box_max_z" value="2.5"/>
 
   <!-- 真机定位话题:FAST-LIO 高频里程计 -->
