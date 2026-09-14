@@ -1,19 +1,19 @@
 <launch>
   <!-- 场地/地图参数(按你们实际场地改) -->
-  <arg name="map_size_x" value="20.0"/>
-  <arg name="map_size_y" value="40.0"/>
+  <arg name="map_size_x" value="50.0"/>
+  <arg name="map_size_y" value="30.0"/>
   <arg name="map_size_z" value="4.0"/>
-  <arg name="init_x" value="0"/>
-  <arg name="init_y" value="0"/>
+  <arg name="init_x" value="0.0"/>
+  <arg name="init_y" value="0.0"/>
   <arg name="init_z" value="0.6"/>
 
   <!-- 飞行安全框：框外一律视为危险区域。数值必须按 FAST-LIO 坐标实测后再首飞。 -->
-  <arg name="box_min_x" value="-2.8"/>
-  <arg name="box_min_y" value="-2.2"/>
+  <arg name="box_min_x" value="-1.0"/>
+  <arg name="box_min_y" value="-11.9"/>
   <arg name="box_min_z" value="0.0"/>
-  <arg name="box_max_x" value="2.8"/>
-  <arg name="box_max_y" value="2.2"/>
-  <arg name="box_max_z" value="2.5"/>
+  <arg name="box_max_x" value="22.0"/>
+  <arg name="box_max_y" value="1.0"/>
+  <arg name="box_max_z" value="2.0"/>
 
   <!-- 真机定位话题:FAST-LIO 高频里程计 -->
   <arg name="odom_topic" value="/Odom_high_freq"/>
@@ -45,7 +45,7 @@
     <arg name="fy" value="387.229248046875"/>
 
     <!-- 首飞速度 -->
-    <arg name="max_vel" value="0.9"/>
+    <arg name="max_vel" value="0.85"/>
     <arg name="max_acc" value="2.0"/>
   </include>
 

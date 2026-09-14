@@ -2,9 +2,9 @@
   <!-- 后期精建：resolution 从 0.05 起。注意 0.05 比 0.1 体素数多 8 倍，内存大，建议台式机跑 -->
   <arg name="resolution" default="0.05"/>
   <!-- map_size 必须覆盖整条录制轨迹(包括往返)，按你实际飞的区域改 -->
-  <arg name="map_size_x" default="30.0"/>
-  <arg name="map_size_y" default="50.0"/>
-  <arg name="map_size_z" default="5.0"/>
+  <arg name="map_size_x" default="50.0"/>
+  <arg name="map_size_y" default="30.0"/>
+  <arg name="map_size_z" default="4.0"/>
 
   <!-- bag 里的话题名。若你录的是别的名字，只改这里 -->
   <arg name="cloud_topic" default="/cloud_registered"/>
