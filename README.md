@@ -146,6 +146,42 @@ echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governo
 
 并且**不要**在机载机上开 RViz（`start_mapping.sh` 已固定 `rviz:=false`）；RViz 可以在地面站笔记本上通过 `ROS_MASTER_URI` 远程连过来。
 
+### 4. 多个 OpenCV 版本共存（Jetson 常见）
+
+Jetson 上经常同时有两套 OpenCV：apt 装的 **4.2** 和 JetPack / 自己编译的 **4.5.4**。而 ROS 的 `cv_bridge` 是按 4.2 编的，于是链接期会出现：
+
+```
+/usr/bin/ld: warning: libopencv_imgcodecs.so.4.2, needed by /opt/ros/noetic/lib/libcv_bridge.so,
+                may conflict with libopencv_imgcodecs.so.4.5
+```
+
+先看清楚机器上到底有几套：
+
+```bash
+ls -d /usr/lib/cmake/opencv4 /usr/lib/aarch64-linux-gnu/cmake/opencv4 /usr/local/lib/cmake/opencv4 2>/dev/null
+ls  /usr/lib/aarch64-linux-gnu/libopencv_core.so.* /usr/local/lib/libopencv_core.so.* 2>/dev/null
+grep -m1 'CV_VERSION_STR' /usr/include/opencv4/opencv2/core/version.hpp 2>/dev/null
+```
+
+然后二选一：
+
+**(a) 让本工作区统一到 apt 的 4.2**（与 `cv_bridge` 一致，最省事）：
+
+```bash
+cd ~/exploration_ws
+catkin_make -DOpenCV_DIR=/usr/lib/aarch64-linux-gnu/cmake/opencv4
+```
+
+**(b) 让全系统统一到 4.5.4**（Jetson 官方推荐，但要重编 `cv_bridge`）：
+
+```bash
+mkdir -p ~/cvbridge_ws/src && cd ~/cvbridge_ws/src
+git clone -b noetic https://github.com/ros-perception/vision_opencv.git
+cd ~/cvbridge_ws && catkin_make -DOpenCV_DIR=<4.5.4 的 cmake 目录>
+```
+
+> 本工程真正用到 OpenCV 的地方只有 `plan_env/src/map_ros.cpp:59` 的 `new cv::Mat`（深度相机通路，真机用 `depth_topic=/no_depth` 并不使用），所以选 (a) 完全够用。
+
 ---
 
 ## 五、常见编译错误速查
@@ -155,6 +191,8 @@ echo performance | sudo tee /sys/devices/system/cpu/cpu*/cpufreq/scaling_governo
 | `Could not find a package configuration file provided by "livox_ros_driver2"` | `livox_ros_driver2/package.xml` 缺失，catkin 没发现该包 | `cp src/livox_ros_driver2/package_ROS1.xml src/livox_ros_driver2/package.xml` |
 | `Cannot find source file: .../Livox-SDK2/...` 或 `livox_ros_driver2_node` 链接失败 | `Livox-SDK2/` 目录缺失 | 见第二节 #2；`setup.sh` 会自动从上游拉取正确的 v1.4.3 |
 | `error: 'LivoxLidarDoubleEchoRawPoint' was not declared` / `'kLivoxLidarTypeMid360s' was not declared`（编译 `pub_handler.cpp`） | 你用的 `Livox-SDK2` 版本过旧（< v1.4.0） | 删掉 `src/livox_ros_driver2/Livox-SDK2/` 后重跑 `bash setup.sh`，它会拉取 v1.4.3 |
+| `/usr/bin/ld: .../devel/lib/libplan_env.so: undefined reference to 'cv::Mat::Mat()'`（链接 `offline_mapper` / `exploration_node` 时） | `plan_env` 用了 OpenCV（`map_ros.cpp:59` 的 `new cv::Mat`）却漏链 `${OpenCV_LIBS}`，导致 `libplan_env.so` 带悬空符号 | 已在 `plan_env/CMakeLists.txt` 补上 `${OpenCV_LIBS}`；若仍报，见下一行 |
+| `/usr/bin/ld: warning: libopencv_imgcodecs.so.4.2 ... may conflict with libopencv_imgcodecs.so.4.5` | 机器上同时存在两个 OpenCV（Jetson 常见：apt 的 4.2 + JetPack/自编译的 4.5），而 ROS 的 `cv_bridge` 是按 4.2 编的 | 让本工作区统一到同一个 OpenCV，或重编 `cv_bridge`（见第四节 4） |
 | `/usr/bin/ld: cannot find -lnlopt` / `cannot find /usr/local/lib/libnlopt.so` | NLopt 没装到 `/usr/local` | `bash setup.sh`（它会源码编译安装） |
 | `Could not find a package configuration file provided by "eigen_conversions"` | 缺 ROS 包 | `sudo apt install ros-noetic-eigen-conversions` |
 | `fatal error: Python.h: No such file or directory`（编译 `fast_lio`） | 缺 python3 头文件（FAST_LIO 有 `find_package(PythonLibs REQUIRED)`） | `sudo apt install python3-dev` |
