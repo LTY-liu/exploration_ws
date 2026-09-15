@@ -1,6 +1,6 @@
 注意事项：
-1.雷达的ip可能会因为硬件的不同而需要修改（路径：F:\EXPO_WS\exploration_ws\src\livox_ros_driver2\config\MID360s_config.json）
-2.连接飞控的串口可能需要稍微修改一下，我们的香橙派是ttyS1，如果是nx可能需改成ttyACMx
+1.雷达的ip可能会因为硬件的不同而需要修改（路径：~/exploration_ws/src/livox_ros_driver2/config/MID360s_config.json）
+2.连接飞控的串口可能需要稍微修改一下，我们的香橙派是ttyS1，如果是nx可能需改成ttyACMx(在start_sensor.sh文件中)
 
 
 
