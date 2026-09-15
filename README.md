@@ -18,12 +18,22 @@ cd ~/exploration_ws
 bash setup.sh
 ```
 
-`setup.sh` 会自动完成：系统依赖 → ROS Noetic → **NLopt（装到 `/usr/local`）** → 校验 Livox 驱动相关文件 → `catkin_make` 全量编译 → 产物与 launch 校验。
+`setup.sh` 会自动完成：系统依赖 → ROS Noetic → 校验 NLopt 与 Livox 驱动相关文件 → `catkin_make` 全量编译 → 产物与 launch 校验。
 
 编译成功后让当前 shell 用上工作区：
 
 ```bash
 source devel/setup.bash
+```
+
+### ★ 支持离线构建
+
+`git clone` 之后**断网也能完整编译**：第三方依赖的源码（NLopt、Livox-SDK2）都已随仓库一起分发，构建过程不访问任何网络。
+
+唯一需要联网的只有系统级前置依赖 —— 第 1 步的 apt 包和第 2 步的 ROS Noetic，请在**联网环境下装一次**；之后换到离线机器上，只要 `clone` + `bash setup.sh` 即可。若目标机已装好 ROS 与依赖，可以只跑：
+
+```bash
+bash setup.sh --skip-apt --skip-ros
 ```
 
 ### 先自检（可选，推荐）
@@ -51,7 +61,7 @@ bash setup.sh --skip-build        # 只装依赖、不编译
 
 | # | 事项 | 现状 |
 |---|---|---|
-| 1 | **`bspline_opt` 把 NLopt 路径写死成 `/usr/local`** —— `set(NLOPT_LIBRARY "/usr/local/lib/libnlopt.so")`。所以 `apt install libnlopt-dev` **无效**（apt 版装在 `/usr/include` 与 `/usr/lib/<arch>-linux-gnu`） | `setup.sh` 会从源码编译 NLopt 并 `make install` 到 `/usr/local` |
+| 1 | **`bspline_opt` 需要 NLopt**。原先它的路径被写死成 `/usr/local/lib/libnlopt.so` 与 `/usr/local/include`，导致必须联网下载编译 NLopt 才能编过，且 `apt install libnlopt-dev` 完全无效（apt 版装在 `/usr/include` 与 `/usr/lib/<arch>-linux-gnu`） | 已改为：**优先用系统已装的 NLopt；找不到就用仓库内置源码离线编译**。内置源码 `src/fuel_planner/bspline_opt/thirdparty/nlopt/`（NLopt v2.7.1，MIT），产出静态库 `libnlopt.a`。想强制使用内置版本：`catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=ON` |
 | 2 | **`src/livox_ros_driver2` 需要同目录下的 `Livox-SDK2/`**，而它不存在于上游 livox_ros_driver2 仓库中（该驱动包的 `CMakeLists.txt` 会在 configure 阶段编译它）。且**版本必须 ≥ v1.4.0**：驱动用到 `LivoxLidarDoubleEchoRawPoint`、`kLivoxLidarDoubleEchoData`、`kLivoxLidarTypeMid360s`（Mid-360S）、`kLivoxLidarTypeAvia2` 等符号，旧 SDK 编译 `pub_handler.cpp` 会报「未声明的标识符」 | 本仓库已内置 **Livox-SDK2 v1.4.3**（`src/livox_ros_driver2/Livox-SDK2/`，commit `08f523c`），clone 下来即完整、无需联网 |
 | 3 | 上游 `livox_ros_driver2` 靠 `./build.sh ROS1` 现场生成 `package.xml` 与 `launch/`；但该脚本会 `rm -rf ../../{build,devel,install}` 并删掉 `src/CMakeLists.txt` | 本仓库已把 `package.xml`（来自 `package_ROS1.xml`）与 `launch/`（来自 `launch_ROS1/`）纳入版本管理，**不要再跑 `build.sh`** |
 
@@ -193,7 +203,9 @@ cd ~/cvbridge_ws && catkin_make -DOpenCV_DIR=<4.5.4 的 cmake 目录>
 | `error: 'LivoxLidarDoubleEchoRawPoint' was not declared` / `'kLivoxLidarTypeMid360s' was not declared`（编译 `pub_handler.cpp`） | 你用的 `Livox-SDK2` 版本过旧（< v1.4.0） | 删掉 `src/livox_ros_driver2/Livox-SDK2/` 后重跑 `bash setup.sh`，它会拉取 v1.4.3 |
 | `/usr/bin/ld: .../devel/lib/libplan_env.so: undefined reference to 'cv::Mat::Mat()'`（链接 `offline_mapper` / `exploration_node` 时） | `plan_env` 用了 OpenCV（`map_ros.cpp:59` 的 `new cv::Mat`）却漏链 `${OpenCV_LIBS}`，导致 `libplan_env.so` 带悬空符号 | 已在 `plan_env/CMakeLists.txt` 补上 `${OpenCV_LIBS}`；若仍报，见下一行 |
 | `/usr/bin/ld: warning: libopencv_imgcodecs.so.4.2 ... may conflict with libopencv_imgcodecs.so.4.5` | 机器上同时存在两个 OpenCV（Jetson 常见：apt 的 4.2 + JetPack/自编译的 4.5），而 ROS 的 `cv_bridge` 是按 4.2 编的 | 让本工作区统一到同一个 OpenCV，或重编 `cv_bridge`（见第四节 4） |
-| `/usr/bin/ld: cannot find -lnlopt` / `cannot find /usr/local/lib/libnlopt.so` | NLopt 没装到 `/usr/local` | `bash setup.sh`（它会源码编译安装） |
+| `内置 NLopt 源码缺失：.../bspline_opt/thirdparty/nlopt/CMakeLists.txt` | clone/拷贝不完整，vendored 依赖目录没带过来 | 确认 `src/fuel_planner/bspline_opt/thirdparty/nlopt/` 存在；若是 `git clone`，检查是否用了 `--filter`/浅克隆把该目录漏掉 |
+| `内置 NLopt configure/编译失败` | 内置源码编译出错，CMake 会把完整输出打出来 | 按输出排查；也可 `catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=OFF` 改用系统 NLopt（`sudo apt install libnlopt-dev`） |
+| `fatal error: nlopt.hpp: 没有那个文件或目录`（老版本才出现） | 旧版 `bspline_opt/CMakeLists.txt` 把 NLopt 写死为 `/usr/local`，而该路径没有 NLopt | 升级到含内置 NLopt 的版本；旧版可临时 `sudo apt install libnlopt-dev` 后把那两行 `set(NLOPT_*)` 改成系统路径 |
 | `Could not find a package configuration file provided by "eigen_conversions"` | 缺 ROS 包 | `sudo apt install ros-noetic-eigen-conversions` |
 | `fatal error: Python.h: No such file or directory`（编译 `fast_lio`） | 缺 python3 头文件（FAST_LIO 有 `find_package(PythonLibs REQUIRED)`） | `sudo apt install python3-dev` |
 | `The dependency target "multi_map_server_generate_messages_cpp" ... does not exist` | 上游 `rviz_plugins` 遗留依赖，本仓库已移除该行 | 确认你的版本已包含该修复 |
@@ -208,6 +220,7 @@ cd ~/cvbridge_ws && catkin_make -DOpenCV_DIR=<4.5.4 的 cmake 目录>
 ```
 exploration_ws/
 ├── setup.sh                       # ★ 一键环境配置 + 编译
+├── .gitattributes                 # 强制 LF（避免 Windows 编辑后提交 CRLF 破坏 .sh）
 ├── start_sensor.sh                # ① MAVROS + Mid-360 驱动
 ├── start_mapping.sh               # ② FAST-LIO
 ├── start_run_ctrl.sh              # ③ px4ctrl 底层控制
@@ -221,18 +234,22 @@ exploration_ws/
     │   ├── active_perception/     # 前沿检测、视点采样、FOV 模型
     │   ├── exploration_manager/   # 探索状态机 + 分层规划器（真机入口 launch 在此）
     │   ├── plan_manage/           # 轨迹管理、B 样条轨迹服务器、安全门
-    │   ├── bspline_opt/           # B 样条轨迹优化（★ NLopt）
+    │   ├── bspline_opt/           # B 样条轨迹优化
+    │   │   └── thirdparty/nlopt/  # ★ 内置 NLopt v2.7.1 源码（离线编译依赖用，MIT）
     │   ├── path_searching/        # 几何 A*、动力学 A*、拓扑路径
     │   └── poly_traj / bspline / traj_utils / utils/lkh_tsp_solver
     ├── realflight_modules/
     │   ├── mid360_fastlio/        # FAST-LIO（含内嵌 Livox 驱动副本，已 CATKIN_IGNORE）
     │   └── px4ctrl/               # 底层位置-姿态控制器（含自动起降、mavros_px4.launch）
-    ├── livox_ros_driver2/         # Livox 官方 ROS1 驱动 + 自带 Livox-SDK2/
+    ├── livox_ros_driver2/         # ★ Livox 官方 ROS1 驱动 + 内置 Livox-SDK2 v1.4.3（离线依赖）
     ├── fuel_bridge/               # odom → PoseStamped 适配
     ├── waypoint_generator/        # 探索触发器
     ├── sim_* / utils/             # FUEL 上游自带的仿真与工具包（真机不使用）
     └── CMakeLists.txt
 ```
+
+> 标 ★ 的两个 `thirdparty`/内置目录是**为了让工程可离线编译**而随仓库分发的第三方源码，
+> 请勿删除；它们是 NLopt 与 Livox-SDK2 的唯一来源。
 
 ---
 
@@ -259,14 +276,12 @@ sudo apt install -y ros-noetic-ros-base ros-noetic-catkin ros-noetic-cmake-modul
   ros-noetic-dynamic-reconfigure ros-noetic-nodelet ros-noetic-mavros ros-noetic-mavros-extras
 sudo /opt/ros/noetic/lib/mavros/install_geographiclib_datasets.sh
 
-# 3) ★ NLopt 到 /usr/local（bspline_opt 硬编码）
-cd /tmp
-curl -L -o nlopt.tar.gz https://github.com/stevengj/nlopt/archive/refs/tags/v2.7.1.tar.gz
-tar xzf nlopt.tar.gz && cd nlopt-2.7.1 && mkdir -p build && cd build
-cmake -DCMAKE_BUILD_TYPE=Release -DNLOPT_PYTHON=OFF -DNLOPT_OCTAVE=OFF \
-      -DNLOPT_MATLAB=OFF -DNLOPT_GUILE=OFF -DNLOPT_SWIG=OFF -DNLOPT_TESTS=OFF ..
-make -j4 && sudo make install && sudo ldconfig
-ls -l /usr/local/lib/libnlopt.so        # 必须存在
+# 3) ★ NLopt —— 不需要你做任何事
+#    bspline_opt/CMakeLists.txt 会先找系统里的 NLopt；找不到就用仓库内置源码
+#    src/fuel_planner/bspline_opt/thirdparty/nlopt/ 现场编成静态库 libnlopt.a。
+#    整个过程不联网，也不需要 sudo。
+#    若想改用系统 NLopt（可选）：
+#      sudo apt install libnlopt-dev && catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=OFF
 
 # 4) 编译
 cd ~/exploration_ws
@@ -274,6 +289,9 @@ source /opt/ros/noetic/setup.bash
 catkin_make -j4
 source devel/setup.bash
 ```
+
+> 编译时会看到一行 `bspline_opt: 未使用系统 NLopt -> 改用仓库内置源码离线编译`，
+> 随后内置 NLopt 会被编成静态库。这是预期行为。
 
 ---
 

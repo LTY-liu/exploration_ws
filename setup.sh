@@ -12,15 +12,21 @@
 # 它会依次完成：
 #   1) 系统依赖（apt：Eigen/PCL/OpenCV/Boost/Armadillo/APR/Qt5/python3-dev ...）
 #   2) ROS Noetic（未安装时自动装；arm64 也有官方 arm64 deb）
-#   3) NLopt → /usr/local（★ bspline_opt/CMakeLists.txt 硬编码该路径，apt 版无效）
+#   3) 校验 NLopt 就位（源码已内置在仓库里，离线编译，无需联网）
 #   4) 校验 Livox-SDK2 与 livox_ros_driver2/package.xml 就位
 #   5) catkin_make 全量编译 + 产物与 launch 校验
 #
+# ★ 离线构建：NLopt 与 Livox-SDK2 的源码都已随仓库分发，`git clone` 之后
+#   断网也能完整编译；本脚本的联网部分只有第 1、2 步的 apt/ROS（这两个是
+#   系统级前置依赖，请在联网环境下装一次）。
+#
 # 可选参数：
 #   bash setup.sh --check         只做环境自检，不改动系统
+#   bash setup.sh --offline       离线模式（= --skip-apt --skip-ros）：只编译，
+#                                 不碰网络。适用于 ROS 与系统依赖已装好的机器
 #   bash setup.sh --skip-apt      跳过系统 apt 安装
 #   bash setup.sh --skip-ros      跳过 ROS 安装
-#   bash setup.sh --skip-nlopt    跳过 NLopt
+#   bash setup.sh --skip-nlopt    跳过 NLopt 检查
 #   bash setup.sh --skip-build    只装依赖、不编译
 #   bash setup.sh --jobs 2        指定并行度（arm64 单板机建议 2~4，避免 OOM）
 #   bash setup.sh --yes           全自动，不再交互确认
@@ -42,6 +48,7 @@ ASSUME_YES=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --check)      DO_CHECK=1; shift ;;
+    --offline)    DO_APT=0; DO_ROS=0; shift ;;   # 等价于 --skip-apt --skip-ros
     --skip-apt)   DO_APT=0; shift ;;
     --skip-ros)   DO_ROS=0; shift ;;
     --skip-nlopt) DO_NLOPT=0; shift ;;
@@ -105,11 +112,20 @@ if [ "$DO_CHECK" -eq 1 ]; then
     if dpkg -s "$p" >/dev/null 2>&1; then ok "apt $p"; else bad "apt $p 缺失"; fi
   done
 
-  step "自检 4/5：★ NLopt 硬编码路径（bspline_opt 要求 /usr/local）"
-  if ls /usr/local/lib/libnlopt.so* >/dev/null 2>&1; then ok "$(ls /usr/local/lib/libnlopt.so* | tr '\n' ' ')"
-  else bad "/usr/local/lib/libnlopt.so 不存在 → bspline_opt 一定链接失败，请跑 bash setup.sh"; fi
-  ls -d /usr/local/include/nlopt* >/dev/null 2>&1 && ok "/usr/local/include/nlopt*" \
-    || bad "/usr/local/include/nlopt* 不存在"
+  step "自检 4/5：NLopt（离线内置，不需要联网）"
+  NLOPT_BUNDLED="$WS/src/fuel_planner/bspline_opt/thirdparty/nlopt"
+  if [ -f "$NLOPT_BUNDLED/CMakeLists.txt" ]; then
+    ok "内置 NLopt 源码就位（NLopt v$NLOPT_VER）→ 离线也能编"
+  else
+    bad "内置 NLopt 源码缺失：$NLOPT_BUNDLED/CMakeLists.txt"
+  fi
+  if ls /usr/local/lib/libnlopt.so* >/dev/null 2>&1; then
+    ok "系统已装 NLopt（/usr/local/lib/libnlopt.so*），bspline_opt 会用系统的"
+  elif [ -f /usr/include/nlopt.hpp ] || [ -f /usr/local/include/nlopt.hpp ]; then
+    ok "系统已装 NLopt 头文件，bspline_opt 会用系统的"
+  else
+    ok "系统未装 NLopt（正常，将使用上面的内置源码）"
+  fi
 
   step "自检 5/5：★ 本仓库自带的 Livox 相关文件"
   DRV="$WS/src/livox_ros_driver2"
@@ -204,37 +220,24 @@ fi
 
 # ----------------------------------------------------------------- 3 NLopt
 if [ "$DO_NLOPT" -eq 1 ]; then
-  step "3/5. NLopt → /usr/local"
-  # fuel_planner/bspline_opt/CMakeLists.txt 里写死了：
-  #   set(NLOPT_INCLUDE_DIR "/usr/local/include")
-  #   set(NLOPT_LIBRARY     "/usr/local/lib/libnlopt.so")
-  # 所以不能依赖 apt 的 libnlopt-dev（它装到 /usr/include 与 /usr/lib/<arch>-linux-gnu）。
+  step "3/5. NLopt（离线内置，不需要联网）"
+  # bspline_opt 需要 NLopt。它现在的查找顺序是：
+  #   1) 系统里已安装的 NLopt（find_path / find_library，不再写死 /usr/local）
+  #   2) 找不到就用仓库内置源码 src/fuel_planner/bspline_opt/thirdparty/nlopt
+  #      现场编成静态库 libnlopt.a —— 整个过程不访问网络。
+  # 所以这里只做检查与说明，不再下载、不再需要 sudo。
   if ls /usr/local/lib/libnlopt.so* >/dev/null 2>&1; then
-    ok "已存在，跳过：$(ls /usr/local/lib/libnlopt.so* | tr '\n' ' ')"
+    ok "系统已装 NLopt（/usr/local/lib/libnlopt.so*），bspline_opt 将直接使用"
+  elif [ -f /usr/include/nlopt.hpp ] || [ -f /usr/local/include/nlopt.hpp ]; then
+    ok "系统已装 NLopt 头文件，bspline_opt 将优先使用系统的"
   else
-    TMP="$(mktemp -d)"; cd "$TMP" || die "无法进入临时目录"
-    echo "  下载 NLopt v$NLOPT_VER ..."
-    curl -L -o nlopt.tar.gz \
-      "https://github.com/stevengj/nlopt/archive/refs/tags/v${NLOPT_VER}.tar.gz" \
-      || die "下载 NLopt 失败（检查网络/代理）"
-    tar xzf nlopt.tar.gz || die "解压失败"
-    cd "nlopt-${NLOPT_VER}" || die "找不到 NLopt 源码目录"
-    mkdir -p build && cd build
-    cmake -DCMAKE_BUILD_TYPE=Release \
-          -DNLOPT_PYTHON=OFF -DNLOPT_OCTAVE=OFF -DNLOPT_MATLAB=OFF \
-          -DNLOPT_GUILE=OFF -DNLOPT_SWIG=OFF -DNLOPT_TESTS=OFF .. \
-      || die "NLopt configure 失败"
-    make -j"$JOBS" || die "NLopt 编译失败"
-    sudo make install || die "NLopt 安装失败"
-    sudo ldconfig
-    ls /usr/local/lib/libnlopt.so* >/dev/null 2>&1 \
-      || die "装完了仍找不到 /usr/local/lib/libnlopt.so —— bspline_opt 会链接失败"
-    ok "NLopt 安装完成"
+    ok "系统未装 NLopt —— 无需处理，将使用仓库内置源码离线编译"
   fi
-  if ! grep -rqs '^/usr/local/lib' /etc/ld.so.conf.d/; then
-    echo '/usr/local/lib' | sudo tee /etc/ld.so.conf.d/local-lib.conf >/dev/null
-    sudo ldconfig
-  fi
+
+  NLOPT_BUNDLED="$WS/src/fuel_planner/bspline_opt/thirdparty/nlopt"
+  [ -f "$NLOPT_BUNDLED/CMakeLists.txt" ] \
+    && ok "内置 NLopt 源码就位（NLopt v$NLOPT_VER，MIT 许可）" \
+    || die "内置 NLopt 源码缺失：$NLOPT_BUNDLED/CMakeLists.txt（该目录随仓库分发，不需要联网下载）"
 else
   step "3/5. NLopt（已跳过）"
 fi

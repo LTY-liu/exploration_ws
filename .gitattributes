@@ -1,0 +1,30 @@
+# ==============================================================================
+# 换行符策略
+#
+# 本工程只在 Linux 上构建与运行（Ubuntu 20.04 + ROS Noetic），但维护者可能在
+# Windows 上编辑代码。一旦把 CRLF 提交进仓库，Linux 端会出现很难排查的问题：
+#   · ./setup.sh: /bin/bash^M: bad interpreter: No such file or directory
+#   · ./start_sensor.sh 等脚本同样无法执行
+#   · CMakeLists.txt / *.launch(XML) 解析报莫名其妙的错
+#
+# 这里统一强制 LF：无论谁、在什么平台上 clone，取出来的都是 LF，
+# 与本机 core.autocrlf 设置无关。
+#
+# 若你此前在 Windows 上提交过 CRLF 文件，执行一次即可纠正：
+#     git add --renormalize .
+# ==============================================================================
+* text=auto eol=lf
+
+# 明确按二进制处理，绝不做换行转换
+*.pdf   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.bag   binary
+*.pcd   binary
+*.npz   binary
+*.a     binary
+*.so    binary
+*.pyc   binary
