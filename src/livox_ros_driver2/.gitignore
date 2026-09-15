@@ -1,4 +1,8 @@
 .vscode
 build
-package.xml
 __pycache__
+
+# 注意：package.xml 与 launch/ 已纳入版本管理（分别由 package_ROS1.xml、
+# launch_ROS1/ 复制而来），这样 `git clone` 之后 catkin 能直接发现本包、
+# roslaunch 也能直接找到 msg_MID360.launch，无需先执行 build.sh。
+# 请勿把 package.xml / launch 加回本文件。

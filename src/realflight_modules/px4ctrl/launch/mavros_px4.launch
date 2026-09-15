@@ -1,0 +1,33 @@
+<launch>
+	<!-- ====================================================================
+	     PX4 真机串口连接（本工程真机流程专用，替代直接改 /opt/ros 里的 px4.launch）
+
+	     为什么需要这个文件：
+	       上游 mavros 的 px4.launch 默认 fcu_url 是 /dev/ttyACM0:57600（SITL/USB），
+	       而本工程真机是通过机载计算机的 UART（如 /dev/ttyS1）连 PX4 的 TELEM 口，
+	       波特率通常为 921600。直接 `roslaunch mavros px4.launch` 会连错口，
+	       现象是「mavros 起来了但 /mavros/* 一点数据都没有」。
+
+	     用法：
+	       roslaunch px4ctrl mavros_px4.launch
+	       roslaunch px4ctrl mavros_px4.launch fcu_url:=/dev/ttyACM0:57600
+	       roslaunch px4ctrl mavros_px4.launch fcu_url:=/dev/ttyS1:921600 gcs_url:=udp://@<地面站IP>
+
+	     ★ 首次在新机器上使用前请确认设备名与波特率：
+	         ls /dev/ttyS* /dev/ttyACM* /dev/ttyUSB*
+	         dmesg | grep -i tty | tail
+	       波特率必须与此飞控参数 MAV_x_BAUD 一致。
+	     ==================================================================== -->
+
+	<arg name="fcu_url" default="/dev/ttyS1:921600" />
+	<arg name="gcs_url" default="" />
+	<arg name="tgt_system" default="1" />
+	<arg name="tgt_component" default="1" />
+
+	<include file="$(find mavros)/launch/px4.launch">
+		<arg name="fcu_url" value="$(arg fcu_url)" />
+		<arg name="gcs_url" value="$(arg gcs_url)" />
+		<arg name="tgt_system" value="$(arg tgt_system)" />
+		<arg name="tgt_component" value="$(arg tgt_component)" />
+	</include>
+</launch>

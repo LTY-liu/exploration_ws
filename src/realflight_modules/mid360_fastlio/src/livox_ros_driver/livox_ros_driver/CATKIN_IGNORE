@@ -1,0 +1,6 @@
+# 本目录（livox_ros_driver，v1 旧版驱动）不是本工程使用的包。
+# 真机与建图使用的是 v2 驱动：src/livox_ros_driver2（fast_lio 依赖它）。
+#
+# 该 v1 包只剩下一份 package.xml，缺失 CMakeLists.txt，无法参与 catkin 编译，
+# 且属于上游 mid360_fastlio 仓库的历史遗留内容。故在此显式排除，
+# 保证 `catkin_make` 在全新 clone 的工作区上 100% 可复现。

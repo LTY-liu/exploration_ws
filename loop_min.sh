@@ -1,10 +1,22 @@
 #!/bin/bash
-# loop_min.sh —— 最简版循环负载
-# 用法: ./loop_min.sh ~/bags/flight.bag [最多秒数]
-# 停止: BB响一叫就按 Ctrl-C
+# ============================================================================
+# loop_min.sh —— 最简版循环负载（让香橙派一直忙，用来测电池放电时间）
+#
+# 用法:
+#     ./loop_min.sh ~/bags/flight.bag              最多跑 5 小时
+#     ./loop_min.sh ~/bags/flight.bag 3600         最多跑 1 小时
+#
+# 停止:
+#     BB响 一叫，按 Ctrl-C，屏幕会打印 TOTAL_SEC=... 这就是总时间
+#
+# 接电（重要）:
+#     4S电池 --> 5V稳压模块 --> 香橙派      不接雷达、不接飞控
+# ============================================================================
 
 BAG="${1:?用法: ./loop_min.sh <bag文件> [最多秒数]}"
 MAXT="${2:-18000}"
+
+# 探索节点的 launch，如果和你们的不一样，改这一行
 EXP_LAUNCH="exploration_manager exploration_real.launch"
 
 [ -f "$BAG" ] || { echo "找不到 bag 文件: $BAG"; exit 1; }
