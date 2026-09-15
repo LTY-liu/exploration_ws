@@ -4,7 +4,7 @@
 
 - 目标系统：**Ubuntu 20.04 (Focal) + ROS Noetic**
 - 已在 **arm64（Orange Pi 5 / RK3588S）** 与 x86_64 上验证
-- 飞行平台：自组四旋翼，2.67 kg，PX4，Livox Mid-360（前倾 15° 安装）
+- 飞行平台：自组四旋翼，PX4，Livox Mid-360（前倾 15° 安装）
 
 ---
 
