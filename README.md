@@ -8,8 +8,6 @@
 
 ---
 
-## 一、快速开始（三条命令）
-
 在**全新的 Ubuntu 20.04** 上：
 
 ```bash
@@ -55,21 +53,6 @@ bash setup.sh --skip-build        # 只装依赖、不编译
 
 ---
 
-## 二、编译前必须知道的三件事
-
-这三条是本工程最容易卡住别人的地方，已经全部在仓库里处理好了，这里说明原因以免误改：
-
-| # | 事项 | 现状 |
-|---|---|---|
-| 1 | **`bspline_opt` 需要 NLopt**。原先它的路径被写死成 `/usr/local/lib/libnlopt.so` 与 `/usr/local/include`，导致必须联网下载编译 NLopt 才能编过，且 `apt install libnlopt-dev` 完全无效（apt 版装在 `/usr/include` 与 `/usr/lib/<arch>-linux-gnu`） | 已改为：**优先用系统已装的 NLopt；找不到就用仓库内置源码离线编译**。内置源码 `src/fuel_planner/bspline_opt/thirdparty/nlopt/`（NLopt v2.7.1，MIT），产出静态库 `libnlopt.a`。想强制使用内置版本：`catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=ON` |
-| 2 | **`src/livox_ros_driver2` 需要同目录下的 `Livox-SDK2/`**，而它不存在于上游 livox_ros_driver2 仓库中（该驱动包的 `CMakeLists.txt` 会在 configure 阶段编译它）。且**版本必须 ≥ v1.4.0**：驱动用到 `LivoxLidarDoubleEchoRawPoint`、`kLivoxLidarDoubleEchoData`、`kLivoxLidarTypeMid360s`（Mid-360S）、`kLivoxLidarTypeAvia2` 等符号，旧 SDK 编译 `pub_handler.cpp` 会报「未声明的标识符」 | 本仓库已内置 **Livox-SDK2 v1.4.3**（`src/livox_ros_driver2/Livox-SDK2/`，commit `08f523c`），clone 下来即完整、无需联网 |
-| 3 | 上游 `livox_ros_driver2` 靠 `./build.sh ROS1` 现场生成 `package.xml`（并顺手把 `launch_ROS1/` 复制成 `launch/`）；但该脚本会 `rm -rf ../../{build,devel,install}` 并删掉 `src/CMakeLists.txt` | 本仓库已把 `package.xml`（来自 `package_ROS1.xml`）纳入版本管理，**不要再跑 `build.sh`**。⚠️ 也**不要**去建 `launch/` 副本：ROS1 的 `roslib` 是遍历整个包目录找同名 launch 文件的，`launch/` 与 `launch_ROS1/` 并存会直接报 `multiple files named [...]`。上游放在 `launch_ROS1/` 里，`roslaunch livox_ros_driver2 msg_MID360.launch` 照样能找到 |
-
-> `src/realflight_modules/mid360_fastlio/src/livox_ros_driver2/` 是 FAST-LIO 上游自带的**重复副本**（含一份旧版 Livox-SDK2），已由 `CATKIN_IGNORE` 排除、不参与编译，可以被安全删除以减小仓库体积。
-
----
-
-## 三、真机运行流程（7 步）
 
 按顺序执行，每一步单独开一个终端：
 
@@ -101,11 +84,10 @@ bash setup.sh --skip-build        # 只装依赖、不编译
 
 ---
 
-## 四、硬件相关配置（换机器必看）
 
 `setup.sh` 不会碰这些，因为都与你的接线/网络有关：
 
-### 1. 飞控串口
+
 
 默认配置假定飞控接在 **`/dev/ttyS1`，波特率 921600**。**这个默认值只在 Orange Pi 一类板子上成立**，
 换板子（尤其是 Jetson）后必须重新确认。
