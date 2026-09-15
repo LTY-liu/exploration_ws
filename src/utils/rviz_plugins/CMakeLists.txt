@@ -63,7 +63,12 @@ include_directories(
 
 add_library(${PROJECT_NAME} ${SOURCE_FILES})
 
-add_dependencies(${PROJECT_NAME} multi_map_server_generate_messages_cpp)
+# 说明（2026 迁移修复）：原为本行 `add_dependencies(${PROJECT_NAME}
+# multi_map_server_generate_messages_cpp)`，但 multi_map_server 并不在本工作区内，
+# 会导致 CMake generate 阶段直接报错 "The dependency target
+# multi_map_server_generate_messages_cpp ... does not exist"，使整个工作区无法编译。
+# 已确认本包源码（src/*.cpp|*.h）不 include、也不链接 multi_map_server 的任何内容，
+# 该依赖纯属上游遗留，故删除。若将来确实需要该包，请把 multi_map_server 加回工作区。
 
 target_link_libraries(${PROJECT_NAME}
     ${catkin_LIBRARIES}

@@ -51,13 +51,15 @@
   <buildtool_depend>catkin</buildtool_depend>
   <build_depend>roscpp</build_depend>
   <build_depend>std_msgs</build_depend>
-  <build_depend>swarmtal_msgs</build_depend>
+  <!-- 2026 迁移修复：原此处有 <build_depend>swarmtal_msgs</build_depend>。
+       swarmtal_msgs 属于 FUEL 上游的集群仓库，并不在本工作区内，也没有被本包
+       CMakeLists.txt 的 find_package(catkin COMPONENTS ...) 引用，仅会导致
+       `rosdep install` 报 "Cannot locate rosdep definition for [swarmtal_msgs]"，故删除。 -->
 
   <build_export_depend>roscpp</build_export_depend>
   <build_export_depend>std_msgs</build_export_depend>
   <exec_depend>roscpp</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>swarmtal_msgs</exec_depend>
 
 
   <!-- The export tag contains other, unspecified, tags -->

@@ -16,21 +16,21 @@
   <build_depend>cmake_modules</build_depend> <!-- for FindEigen.cmake -->
   <build_depend>roscpp</build_depend>
   <build_depend>roslib</build_depend>
-  <build_depend>svo_msgs</build_depend>
   <build_depend>cv_bridge</build_depend>
   <build_depend>image_transport</build_depend>
-  <build_depend>vikit_ros</build_depend>
   <build_depend>pcl_ros</build_depend>
   <build_depend>dynamic_reconfigure</build_depend>
   <build_depend>quadrotor_msgs</build_depend>
+  <!-- 2026 迁移修复：原此处有 svo_msgs / vikit_ros 两个依赖。二者来自 SVO 视觉里程计
+       仓库，不在本工作区内，也未被本包 CMakeLists.txt 引用（非 CUDA 分支只用
+       roscpp/roslib/cv_bridge/cmake_modules/pcl_ros/sensor_msgs/geometry_msgs/
+       nav_msgs/quadrotor_msgs），仅会让 rosdep 解析失败，故删除。 -->
 
   <!-- Dependencies needed after this package is compiled. -->
   <run_depend>roscpp</run_depend>
   <run_depend>roslib</run_depend>
-  <run_depend>svo_msgs</run_depend>
   <run_depend>cv_bridge</run_depend>
   <run_depend>image_transport</run_depend>
-  <run_depend>vikit_ros</run_depend>
   <run_depend>pcl_ros</run_depend>
   <run_depend>dynamic_reconfigure</run_depend>
   <run_depend>quadrotor_msgs</run_depend>
