@@ -131,8 +131,11 @@ if [ "$DO_CHECK" -eq 1 ]; then
   DRV="$WS/src/livox_ros_driver2"
   [ -f "$DRV/package.xml" ]    && ok "livox_ros_driver2/package.xml" \
     || bad "缺 livox_ros_driver2/package.xml（catkin 会看不到这个包）"
-  [ -d "$DRV/launch" ]         && ok "livox_ros_driver2/launch/" \
-    || bad "缺 livox_ros_driver2/launch/（msg_MID360.launch 找不到）"
+  [ -f "$DRV/launch_ROS1/msg_MID360.launch" ] && ok "livox_ros_driver2/launch_ROS1/msg_MID360.launch" \
+    || bad "缺 livox_ros_driver2/launch_ROS1/msg_MID360.launch"
+  if [ -d "$DRV/launch" ]; then
+    bad "livox_ros_driver2/launch/ 与 launch_ROS1/ 并存 → roslaunch 会报 multiple files，需删除 launch/"
+  fi
   if [ -f "$DRV/Livox-SDK2/CMakeLists.txt" ]; then
     if grep -q 'LivoxLidarDoubleEchoRawPoint' "$DRV/Livox-SDK2/include/livox_lidar_def.h" 2>/dev/null \
        && grep -q 'kLivoxLidarTypeMid360s' "$DRV/Livox-SDK2/include/livox_lidar_def.h" 2>/dev/null; then
@@ -253,12 +256,21 @@ if [ ! -f "$DRV/package.xml" ] && [ -f "$DRV/package_ROS1.xml" ]; then
 fi
 [ -f "$DRV/package.xml" ] || die "livox_ros_driver2/package.xml 缺失，catkin 无法发现该包"
 
-# 若 launch/ 缺失，从 launch_ROS1/ 复制
-if [ ! -d "$DRV/launch" ] && [ -d "$DRV/launch_ROS1" ]; then
-  warn "livox_ros_driver2/launch/ 缺失 → 从 launch_ROS1/ 复制"
-  cp -r "$DRV/launch_ROS1" "$DRV/launch"
+# ★ 注意：不要在 livox_ros_driver2 里再建一个 launch/ 目录！
+#   ROS1 的 roslib.packages.find_resource 是「遍历整个包目录」找同名 launch 文件的，
+#   同一个包内出现两份同名 launch 会直接报：
+#       RLException: multiple files named [msg_MID360.launch] in package [livox_ros_driver2]
+#   上游把 ROS1 的 launch 放在 launch_ROS1/ 里，roslaunch 照样能找到，
+#   所以唯一的正确状态就是「只有 launch_ROS1/」。
+LIDAR_PKG="$WS/src/livox_ros_driver2"
+if [ -d "$LIDAR_PKG/launch" ]; then
+  warn "检测到 livox_ros_driver2/launch/ 与 launch_ROS1/ 并存（会导致 roslaunch 报 multiple files）"
+  warn "→ 正在删除多余副本：$LIDAR_PKG/launch"
+  rm -rf "$LIDAR_PKG/launch"
 fi
-[ -f "$DRV/launch/msg_MID360.launch" ] || die "livox_ros_driver2/launch/msg_MID360.launch 缺失"
+[ -f "$LIDAR_PKG/launch_ROS1/msg_MID360.launch" ] \
+  || die "livox_ros_driver2/launch_ROS1/msg_MID360.launch 缺失"
+ok "livox_ros_driver2/launch_ROS1/msg_MID360.launch 就位（且无同名副本）"
 
 # ★ Livox-SDK2 必须在（驱动包 CMakeLists 会编译它），且必须是 ≥ v1.4.0 的新版本
 SDK2="$DRV/Livox-SDK2"

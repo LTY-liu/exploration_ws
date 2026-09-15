@@ -63,7 +63,7 @@ bash setup.sh --skip-build        # 只装依赖、不编译
 |---|---|---|
 | 1 | **`bspline_opt` 需要 NLopt**。原先它的路径被写死成 `/usr/local/lib/libnlopt.so` 与 `/usr/local/include`，导致必须联网下载编译 NLopt 才能编过，且 `apt install libnlopt-dev` 完全无效（apt 版装在 `/usr/include` 与 `/usr/lib/<arch>-linux-gnu`） | 已改为：**优先用系统已装的 NLopt；找不到就用仓库内置源码离线编译**。内置源码 `src/fuel_planner/bspline_opt/thirdparty/nlopt/`（NLopt v2.7.1，MIT），产出静态库 `libnlopt.a`。想强制使用内置版本：`catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=ON` |
 | 2 | **`src/livox_ros_driver2` 需要同目录下的 `Livox-SDK2/`**，而它不存在于上游 livox_ros_driver2 仓库中（该驱动包的 `CMakeLists.txt` 会在 configure 阶段编译它）。且**版本必须 ≥ v1.4.0**：驱动用到 `LivoxLidarDoubleEchoRawPoint`、`kLivoxLidarDoubleEchoData`、`kLivoxLidarTypeMid360s`（Mid-360S）、`kLivoxLidarTypeAvia2` 等符号，旧 SDK 编译 `pub_handler.cpp` 会报「未声明的标识符」 | 本仓库已内置 **Livox-SDK2 v1.4.3**（`src/livox_ros_driver2/Livox-SDK2/`，commit `08f523c`），clone 下来即完整、无需联网 |
-| 3 | 上游 `livox_ros_driver2` 靠 `./build.sh ROS1` 现场生成 `package.xml` 与 `launch/`；但该脚本会 `rm -rf ../../{build,devel,install}` 并删掉 `src/CMakeLists.txt` | 本仓库已把 `package.xml`（来自 `package_ROS1.xml`）与 `launch/`（来自 `launch_ROS1/`）纳入版本管理，**不要再跑 `build.sh`** |
+| 3 | 上游 `livox_ros_driver2` 靠 `./build.sh ROS1` 现场生成 `package.xml`（并顺手把 `launch_ROS1/` 复制成 `launch/`）；但该脚本会 `rm -rf ../../{build,devel,install}` 并删掉 `src/CMakeLists.txt` | 本仓库已把 `package.xml`（来自 `package_ROS1.xml`）纳入版本管理，**不要再跑 `build.sh`**。⚠️ 也**不要**去建 `launch/` 副本：ROS1 的 `roslib` 是遍历整个包目录找同名 launch 文件的，`launch/` 与 `launch_ROS1/` 并存会直接报 `multiple files named [...]`。上游放在 `launch_ROS1/` 里，`roslaunch livox_ros_driver2 msg_MID360.launch` 照样能找到 |
 
 > `src/realflight_modules/mid360_fastlio/src/livox_ros_driver2/` 是 FAST-LIO 上游自带的**重复副本**（含一份旧版 Livox-SDK2），已由 `CATKIN_IGNORE` 排除、不参与编译，可以被安全删除以减小仓库体积。
 
@@ -107,21 +107,105 @@ bash setup.sh --skip-build        # 只装依赖、不编译
 
 ### 1. 飞控串口
 
-默认配置假定飞控接在 **`/dev/ttyS1`，波特率 921600**：
+默认配置假定飞控接在 **`/dev/ttyS1`，波特率 921600**。**这个默认值只在 Orange Pi 一类板子上成立**，
+换板子（尤其是 Jetson）后必须重新确认。
+
+**先跑这 5 行，直接告出哪几个 tty 是真能打开的**：
 
 ```bash
-ls /dev/ttyS* /dev/ttyACM*            # ★ 确认实际设备名（不同板子 UART 编号不同）
-dmesg | grep -i tty | tail
-sudo usermod -aG dialout $USER        # 之后重新登录，就不必每次 chmod 777
+python3 - <<'EOF'
+import os, glob
+for dev in sorted(glob.glob('/dev/ttyTHS*') + glob.glob('/dev/ttyS*') +
+                  glob.glob('/dev/ttyACM*') + glob.glob('/dev/ttyUSB*')):
+    try:
+        fd = os.open(dev, os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
+        os.close(fd)
+        print(f"  可用   {dev}")
+    except OSError as e:
+        print(f"  打不开 {dev}  -> {e.strerror}")
+EOF
 ```
 
-端口/波特率不同时，改 `src/realflight_modules/px4ctrl/launch/mavros_px4.launch` 的 `fcu_url` 默认值，或临时覆盖：
+#### ⚠️ `FCU: DeviceError:serial:open: Input/output error` 怎么解
+
+mavros 的这行报错是 `open(2)` 返回的 **errno 5 (EIO)**，含义要和对错区分开：
+
+| 报错 | 含义 |
+|---|---|
+| `No such file or directory` | 设备节点不存在 |
+| `Permission denied` | 权限不够（`sudo usermod -aG dialout $USER`） |
+| `Device or resource busy` | 被别的进程占用 |
+| **`Input/output error`** | **节点存在，但它背后没有可用的 UART** |
+
+结论：**EIO 是独立故障，接上飞控也大概率不通**。因为 UART 的 `open()` 并不需要对面有设备——
+就算飞控一根线没接，只要节点是真串口，open 也会成功，mavros 之后才会报「收不到心跳」。
+
+**板子差异（换板子最常踩）**：
+
+| | Orange Pi / 树莓派 | Jetson (L4T) |
+|---|---|---|
+| 真实 UART | `/dev/ttyS1`、`/dev/ttyS0` | **`/dev/ttyTHS0`、`/dev/ttyTHS1`…**（Tegra HSUART） |
+| `/dev/ttyS*` | 就是真串口 | 常为 8250 **占位节点**，`open()` 直接 EIO |
+
+**Jetson 额外两个坑**：
 
 ```bash
-FCU_URL=/dev/ttyACM0:57600 ./start_sensor.sh
+# ① nvgetty 占着串口（L4T 默认把 ttyTHS0 当串口控制台）
+sudo systemctl disable --now nvgetty
+sudo systemctl disable --now serial-getty@ttyTHS0.service
+
+# ② 40-pin 引脚的 pinmux 默认不是 UART，需配置后重启
+sudo /opt/nvidia/jetson-io/jetson-io.py     # Configure 40-pin header → 对应脚设为 uart
+```
+
+**硬件级确证**（TX/RX 短接后自发自收）：
+
+```bash
+sudo stty -F /dev/ttyTHS1 921600 raw -echo
+sudo cat /dev/ttyTHS1 &
+sudo sh -c 'echo hello-uart > /dev/ttyTHS1'   # 读端应打印 hello-uart
+kill %1
+```
+
+**确定设备名后接入工程**（推荐直接改默认值）：
+
+```bash
+FCU_URL=/dev/ttyTHS1:921600 ./start_sensor.sh
+# 或改 src/realflight_modules/px4ctrl/launch/mavros_px4.launch 的 fcu_url 默认值
+```
+
+> 波特率必须与飞控参数 `MAV_x_BAUD` 一致（接伴飞电脑的 TELEM 口通常 921600）。
+> 换板子后这个值也要复核，不要沿用旧板子的配置。
+
+**如果飞控不是走排针 UART**，Jetson 上还有更省事的两种接法：
+
+```bash
+FCU_URL=/dev/ttyACM0:57600            ./start_sensor.sh   # PX4 USB 口直连
+FCU_URL=udp://:14540@127.0.0.1:14557  ./start_sensor.sh   # MAVLink over UDP（网口/WiFi）
 ```
 
 > 为什么不用 `roslaunch mavros px4.launch`？因为上游默认 `fcu_url` 是 `/dev/ttyACM0:57600`（SITL/USB），连真机会出现「mavros 起来了但 `/mavros/*` 没有数据」。
+
+#### 没有飞控/雷达时怎么测试
+
+`start_sensor.sh` 把「飞控 + 雷达」绑在一起，两样都没有时别用它。注意 **`roslaunch mavros` 会自己起一个 roscore**，
+mavros 一死就把 master 带走，后续 `roslaunch` 会报 `Unable to register with master node` —— 那是连锁反应，不是新故障。
+所以**先单独起 master**：
+
+```bash
+roscore &
+source devel/setup.bash
+roslaunch --nodes livox_ros_driver2 msg_MID360.launch      # 只解析，不起进程
+roslaunch --nodes fast_lio mapping_mid360.launch
+roslaunch --nodes exploration_manager exploration_real.launch
+```
+
+要真跑算法链，用 bag 回放（不需要雷达、不需要飞控）：
+
+```bash
+./loop_min.sh /path/to/your.bag        # 起 FAST-LIO + FUEL 并回放
+```
+
 
 ### 2. 雷达网口静态 IP
 
@@ -206,6 +290,9 @@ cd ~/cvbridge_ws && catkin_make -DOpenCV_DIR=<4.5.4 的 cmake 目录>
 | `内置 NLopt 源码缺失：.../bspline_opt/thirdparty/nlopt/CMakeLists.txt` | clone/拷贝不完整，vendored 依赖目录没带过来 | 确认 `src/fuel_planner/bspline_opt/thirdparty/nlopt/` 存在；若是 `git clone`，检查是否用了 `--filter`/浅克隆把该目录漏掉 |
 | `内置 NLopt configure/编译失败` | 内置源码编译出错，CMake 会把完整输出打出来 | 按输出排查；也可 `catkin_make -DBSplineOpt_USE_BUNDLED_NLOPT=OFF` 改用系统 NLopt（`sudo apt install libnlopt-dev`） |
 | `fatal error: nlopt.hpp: 没有那个文件或目录`（老版本才出现） | 旧版 `bspline_opt/CMakeLists.txt` 把 NLopt 写死为 `/usr/local`，而该路径没有 NLopt | 升级到含内置 NLopt 的版本；旧版可临时 `sudo apt install libnlopt-dev` 后把那两行 `set(NLOPT_*)` 改成系统路径 |
+| `RLException: multiple files named [msg_MID360.launch] in package [livox_ros_driver2]`（同时列出 `launch/` 与 `launch_ROS1/` 两个路径） | `livox_ros_driver2` 里同时存在 `launch/` 和 `launch_ROS1/` 两份同名 launch。ROS1 的 `roslib` 遍历整个包目录，找到多个同名文件就报错 | 删掉多余的 `launch/`：`rm -rf src/livox_ros_driver2/launch`（保留上游的 `launch_ROS1/` 即可，roslaunch 能找到） |
+| `[FATAL] FCU: DeviceError:serial:open: Input/output error` | 串口节点存在但背后没有可用的 UART。**注意这不是「没接飞控」**——UART 的 open 不需要对面有设备。常见于换板子后沿用了旧设备名（Jetson 真串口是 `/dev/ttyTHS*`，`/dev/ttyS*` 多为占位节点） | 见第四节 1：先用那段 python 探测脚本找出真正能 open 的 tty，Jetson 还要 `disable nvgetty` / 配 pinmux |
+| `Unable to register with master node ... master may not be running yet` | 上一条的连锁反应：`roslaunch mavros` 自己起了 roscore，mavros 一死 master 就被关掉 | 测试时先单独 `roscore &`，再起其它节点 |
 | `Could not find a package configuration file provided by "eigen_conversions"` | 缺 ROS 包 | `sudo apt install ros-noetic-eigen-conversions` |
 | `fatal error: Python.h: No such file or directory`（编译 `fast_lio`） | 缺 python3 头文件（FAST_LIO 有 `find_package(PythonLibs REQUIRED)`） | `sudo apt install python3-dev` |
 | `The dependency target "multi_map_server_generate_messages_cpp" ... does not exist` | 上游 `rviz_plugins` 遗留依赖，本仓库已移除该行 | 确认你的版本已包含该修复 |

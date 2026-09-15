@@ -1,22 +1,33 @@
 <launch>
 	<!-- ====================================================================
-	     PX4 真机串口连接（本工程真机流程专用，替代直接改 /opt/ros 里的 px4.launch）
+	     PX4 真机串口连接（本工程真机流程专用）
 
-	     为什么需要这个文件：
-	       上游 mavros 的 px4.launch 默认 fcu_url 是 /dev/ttyACM0:57600（SITL/USB），
-	       而本工程真机是通过机载计算机的 UART（如 /dev/ttyS1）连 PX4 的 TELEM 口，
-	       波特率通常为 921600。直接 `roslaunch mavros px4.launch` 会连错口，
-	       现象是「mavros 起来了但 /mavros/* 一点数据都没有」。
+	     ★★★ 换机器必改 ★★★
+	     下面 fcu_url 的默认值 /dev/ttyS1:921600 **只适用于 Orange Pi / 树莓派
+	     这一类板子**。如果你用的是 Jetson Orin / Xavier / Nano，或者其它板子，
+	     请把它改成你自己板子上的设备口，例如：
 
-	     用法：
-	       roslaunch px4ctrl mavros_px4.launch
-	       roslaunch px4ctrl mavros_px4.launch fcu_url:=/dev/ttyACM0:57600
-	       roslaunch px4ctrl mavros_px4.launch fcu_url:=/dev/ttyS1:921600 gcs_url:=udp://@<地面站IP>
+	         Jetson 系列        /dev/ttyTHS1     （也可能是 /dev/ttyTHS0）
+	         PX4 USB 口直连     /dev/ttyACM0
+	         MAVLink over UDP   udp://:14540@127.0.0.1:14557
 
-	     ★ 首次在新机器上使用前请确认设备名与波特率：
-	         ls /dev/ttyS* /dev/ttyACM* /dev/ttyUSB*
-	         dmesg | grep -i tty | tail
-	       波特率必须与此飞控参数 MAV_x_BAUD 一致。
+	     波特率同理，必须与该飞控参数 MAV_x_BAUD 一致
+	     （接伴飞电脑的 TELEM 口通常是 921600）。
+
+	     不确定该用哪个设备口？跑 README「四、硬件相关配置 → 1. 飞控串口」里
+	     那段 python 探测脚本，它会列出哪些 tty 真能打开。
+	     也可以不改这个文件、临时覆盖：
+	         FCU_URL=/dev/ttyTHS1:921600 ./start_sensor.sh
+	         roslaunch px4ctrl mavros_px4.launch fcu_url:=/dev/ttyTHS1:921600
+
+	     ⚠ 如果 mavros 报 "FCU: DeviceError:serial:open: Input/output error"，
+	     那说明这个 tty 节点存在但背后没有可用的 UART（**不是**没接飞控 ——
+	     UART 的 open 并不需要对面有设备）。换板子后最常遇到，换成上面对应的
+	     设备口即可。
+
+	     为什么需要单独有这个文件：上游 mavros 的 px4.launch 默认 fcu_url 是
+	     /dev/ttyACM0:57600（SITL/USB），直接拿它连真机会出现
+	     「mavros 起来了但 /mavros/* 一点数据都没有」。
 	     ==================================================================== -->
 
 	<arg name="fcu_url" default="/dev/ttyS1:921600" />
